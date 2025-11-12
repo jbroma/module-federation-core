@@ -11,10 +11,15 @@ const {withModuleFederation} = require('@module-federation/metro');
  */
 
 const config = {
-  resolver: {useWatchman: false},
+  resolver: {
+    useWatchman: false,
+    extraNodeModules: {
+      '@babel/runtime': path.resolve(__dirname, 'node_modules/@babel/runtime'),
+    },
+  },
   watchFolders: [
     path.resolve(__dirname, '../../node_modules'),
-    path.resolve(__dirname, '../../packages/core'),
+    path.resolve(__dirname, '../../packages'),
   ],
 };
 
