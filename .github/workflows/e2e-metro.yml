@@ -34,7 +34,6 @@ jobs:
         uses: actions/checkout@v4
 
       - name: Android E2E Tests
-        if: steps.check-ci.outputs.run-e2e == 'true'
         uses: ./.github/actions/android-e2e
         with:
           app_name: ${{ matrix.app_name }}
@@ -54,7 +53,6 @@ jobs:
         uses: actions/checkout@v4
 
       - name: iOS E2E Tests
-        if: steps.check-ci.outputs.run-e2e == 'true'
         uses: ./.github/actions/ios-e2e
         with:
           app_name: ${{ matrix.app_name }}
