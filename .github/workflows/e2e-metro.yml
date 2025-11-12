@@ -2,6 +2,7 @@ name: Trigger E2E Tests
 
 on:
   workflow_call:
+  workflow_dispatch:
 
 permissions:
   actions: read
@@ -19,7 +20,7 @@ jobs:
     timeout-minutes: 60
     strategy:
       matrix:
-        app_name: [example-host]
+        app_name: [metro-example-host]
     env:
       ANDROID_EMULATOR_API_LEVEL: 28
       ANDROID_EMULATOR_TARGET: default
@@ -32,17 +33,7 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Determine whether metro apps are affected
-        id: check-ci
-        run: |
-          if node tools/scripts/ci-is-affected.mjs --appName=${{ matrix.app_name }}; then
-            echo "run-e2e=true" >> "$GITHUB_OUTPUT"
-          else
-            echo "run-e2e=false" >> "$GITHUB_OUTPUT"
-          fi
-
       - name: Android E2E Tests
-        if: steps.check-ci.outputs.run-e2e == 'true'
         uses: ./.github/actions/android-e2e
         with:
           app_name: ${{ matrix.app_name }}
@@ -52,7 +43,7 @@ jobs:
     timeout-minutes: 60
     strategy:
       matrix:
-        app_name: [example-host]
+        app_name: [metro-example-host]
     env:
       RUBY_VERSION: 2.7.6
       MAESTRO_VERSION: 1.39.13
@@ -61,17 +52,7 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Determine whether metro apps are affected
-        id: check-ci
-        run: |
-          if node tools/scripts/ci-is-affected.mjs --appName=${{ matrix.app_name }}; then
-            echo "run-e2e=true" >> "$GITHUB_OUTPUT"
-          else
-            echo "run-e2e=false" >> "$GITHUB_OUTPUT"
-          fi
-
       - name: iOS E2E Tests
-        if: steps.check-ci.outputs.run-e2e == 'true'
         uses: ./.github/actions/ios-e2e
         with:
           app_name: ${{ matrix.app_name }}
