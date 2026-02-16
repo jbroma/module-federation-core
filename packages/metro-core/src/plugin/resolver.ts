@@ -17,7 +17,7 @@ import {
   getRemoteModule,
   getRemoteModuleRegistryModule,
 } from './generators';
-import { isUsingMFBundleCommand, removeExtension } from './helpers';
+import { isMFBundleCommand, removeExtension } from './helpers';
 
 interface CreateResolveRequestOptions {
   isRemote: boolean;
@@ -151,7 +151,7 @@ export function createResolveRequest({
     }
 
     // replace HMRClient module with HMRClientShim when using bundle commands
-    if (isUsingMFBundleCommand() && moduleName.endsWith('HMRClient')) {
+    if (isMFBundleCommand() && moduleName.endsWith('HMRClient')) {
       const res = customResolver
         ? customResolver(context, moduleName, platform)
         : context.resolveRequest(context, moduleName, platform);

@@ -9,8 +9,8 @@ import type {
 import { VirtualModuleManager } from '../utils';
 import { createBabelTransformer } from './babel-transformer';
 import {
-  isUsingMFBundleCommand,
-  isUsingMFCommand,
+  isMFEnabledCommand,
+  isRemoteBundleCommand,
   prepareTmpDir,
   replaceExtension,
   stubRemoteEntry,
@@ -28,8 +28,6 @@ declare global {
   // eslint-disable-next-line no-var
   var __METRO_FEDERATION_CONFIG: ModuleFederationConfigNormalized;
   // eslint-disable-next-line no-var
-  var __METRO_FEDERATION_ORIGINAL_ENTRY_PATH: string | undefined;
-  // eslint-disable-next-line no-var
   var __METRO_FEDERATION_REMOTE_ENTRY_PATH: string | undefined;
   // eslint-disable-next-line no-var
   var __METRO_FEDERATION_MANIFEST_PATH: string | undefined;
@@ -40,7 +38,7 @@ export function withModuleFederation(
   federationOptions: ModuleFederationConfig,
   extraOptions?: ModuleFederationExtraOptions,
 ): ConfigT {
-  if (isUsingMFCommand()) {
+  if (isMFEnabledCommand()) {
     return augmentConfig(config, federationOptions, extraOptions);
   }
 
@@ -51,10 +49,10 @@ export function withModuleFederation(
     ) +
       util.styleText(
         'yellow',
-        'To enable Module Federation, please use one of the dedicated bundle commands:\n',
+        'To enable Module Federation, use standard commands for hosts and the remote command for containers:\n',
       ) +
-      ` ${util.styleText('dim', '•')} bundle-mf-host` +
-      util.styleText('dim', ' - for bundling a host application\n') +
+      ` ${util.styleText('dim', '•')} start / bundle` +
+      util.styleText('dim', ' - for host application dev/build\n') +
       ` ${util.styleText('dim', '•')} bundle-mf-remote` +
       util.styleText('dim', ' - for bundling a remote application\n'),
   );
@@ -83,15 +81,6 @@ function augmentConfig(
 
   const vmManager = new VirtualModuleManager(config);
   vmManager.installMetroPatches();
-
-  // original host entrypoint, usually <projectRoot>/index.js
-  const { originalEntryPath } = getOriginalEntry(
-    config.projectRoot,
-    'index.js',
-  );
-
-  // host uses the original entrypoint (no host stub indirection)
-  const hostEntryPath = originalEntryPath;
 
   // virtual remote entrypoint
   const remoteEntryFilename = replaceExtension(options.filename, '.js');
@@ -130,7 +119,6 @@ function augmentConfig(
 
   // pass data to bundle-mf-remote command
   global.__METRO_FEDERATION_CONFIG = options;
-  global.__METRO_FEDERATION_HOST_ENTRY_PATH = hostEntryPath;
   global.__METRO_FEDERATION_REMOTE_ENTRY_PATH = remoteEntryPath;
   global.__METRO_FEDERATION_MANIFEST_PATH = manifestPath;
 
@@ -140,7 +128,7 @@ function augmentConfig(
       ...config.serializer,
       customSerializer: getModuleFederationSerializer(
         options,
-        isUsingMFBundleCommand(),
+        isRemoteBundleCommand(),
       ),
       getModulesRunBeforeMainModule: (entryFilePath) => {
         const getModulesRunBeforeMainModule =
@@ -207,17 +195,4 @@ function augmentConfig(
       }),
     },
   };
-}
-
-function getOriginalEntry(
-  projectRoot: string,
-  entryFilename: string,
-): {
-  originalEntryPath: string;
-} {
-  const originalEntryPath = path.resolve(
-    projectRoot,
-    global.__METRO_FEDERATION_ORIGINAL_ENTRY_PATH ?? entryFilename,
-  );
-  return { originalEntryPath };
 }

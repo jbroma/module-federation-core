@@ -2,14 +2,17 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { TMP_DIR_NAME } from './constants';
 
-export function isUsingMFCommand(command = process.argv[2]) {
-  const allowedCommands = ['start', 'bundle-mf-host', 'bundle-mf-remote'];
+export function isMFEnabledCommand(command = process.argv[2]) {
+  const allowedCommands = ['start', 'bundle', 'bundle-mf-remote'];
   return allowedCommands.includes(command);
 }
 
-export function isUsingMFBundleCommand(command = process.argv[2]) {
-  const allowedCommands = ['bundle-mf-host', 'bundle-mf-remote'];
-  return allowedCommands.includes(command);
+export function isRemoteBundleCommand(command = process.argv[2]) {
+  return command === 'bundle-mf-remote';
+}
+
+export function isMFBundleCommand(command = process.argv[2]) {
+  return command === 'bundle' || isRemoteBundleCommand(command);
 }
 
 export function replaceExtension(filepath: string, extension: string) {

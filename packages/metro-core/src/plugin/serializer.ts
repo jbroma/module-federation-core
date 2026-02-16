@@ -13,7 +13,7 @@ type CustomSerializer = SerializerConfigT['customSerializer'];
 
 export function getModuleFederationSerializer(
   mfConfig: ModuleFederationConfigNormalized,
-  isUsingMFBundleCommand: boolean,
+  isRemoteBundleCommand: boolean,
 ): CustomSerializer {
   return async (entryPoint, preModules, graph, options) => {
     const syncRemoteModules = collectSyncRemoteModules(graph, mfConfig.remotes);
@@ -38,7 +38,7 @@ export function getModuleFederationSerializer(
       entryPoint,
       options.projectRoot,
       mfConfig.exposes,
-      isUsingMFBundleCommand,
+      isRemoteBundleCommand,
     );
     const finalPreModules = [
       getSyncShared(syncSharedModules, bundlePath, mfConfig.name),
@@ -170,10 +170,10 @@ function getBundlePath(
   entryPoint: string,
   projectRoot: string,
   exposes: ModuleFederationConfigNormalized['exposes'],
-  isUsingMFBundleCommand: boolean,
+  isRemoteBundleCommand: boolean,
 ) {
   const relativeEntryPath = path.relative(projectRoot, entryPoint);
-  if (!isUsingMFBundleCommand) {
+  if (!isRemoteBundleCommand) {
     const { dir, name } = path.parse(relativeEntryPath);
     return path.format({ dir, name, ext: '' });
   }

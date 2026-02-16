@@ -48,6 +48,15 @@ function createHostOptions() {
   };
 }
 
+function createRemoteOptions() {
+  return {
+    ...createHostOptions(),
+    exposes: {
+      './mini': './src/mini.ts',
+    },
+  };
+}
+
 describe('withModuleFederation host integration', () => {
   const originalArgv = [...process.argv];
   const tempDirs: Array<string> = [];
@@ -89,7 +98,6 @@ describe('withModuleFederation host integration', () => {
     } as unknown as ConfigT;
 
     const augmented = withModuleFederation(config, createHostOptions());
-    const expectedHostEntryPath = path.resolve(projectRoot, 'index.js');
     const expectedInitHostPath = path.resolve(
       projectRoot,
       'node_modules',
@@ -100,15 +108,10 @@ describe('withModuleFederation host integration', () => {
       '../../modules/asyncRequire.ts',
     );
 
-    expect((global as any).__METRO_FEDERATION_HOST_ENTRY_PATH).toBe(
-      expectedHostEntryPath,
-    );
-    expect((global as any).__METRO_FEDERATION_HOST_ENTRY_PATH).not.toContain(
-      TMP_DIR_NAME,
-    );
+    expect((global as any).__METRO_FEDERATION_HOST_ENTRY_PATH).toBeUndefined();
 
     const premodules = augmented.serializer.getModulesRunBeforeMainModule!(
-      expectedHostEntryPath,
+      path.resolve(projectRoot, 'index.js'),
     );
 
     expect(premodules).toEqual([
@@ -120,6 +123,93 @@ describe('withModuleFederation host integration', () => {
     expect(
       augmented.server.rewriteRequestUrl?.('http://localhost/index.bundle'),
     ).toBe('http://localhost/index.bundle');
+  });
+
+  test('enables plugin behavior for standard bundle command', () => {
+    process.argv[2] = 'bundle';
+    const projectRoot = createProjectRoot();
+    tempDirs.push(projectRoot);
+
+    const config = {
+      projectRoot,
+      serializer: {
+        getModulesRunBeforeMainModule: jest.fn(() => ['InitializeCore']),
+        getPolyfills: jest.fn(() => ['polyfill']),
+      },
+      transformer: {
+        babelTransformerPath: 'metro-react-native-babel-transformer',
+      },
+      resolver: {},
+      server: {},
+    } as unknown as ConfigT;
+
+    const augmented = withModuleFederation(config, createHostOptions());
+    expect(augmented).not.toBe(config);
+    expect(typeof augmented.serializer.customSerializer).toBe('function');
+  });
+
+  test('warns with standard host guidance for unsupported commands', () => {
+    process.argv[2] = 'inspect';
+    const projectRoot = createProjectRoot();
+    tempDirs.push(projectRoot);
+
+    const warnSpy = jest.spyOn(console, 'warn').mockImplementation(() => {});
+
+    const config = {
+      projectRoot,
+      serializer: {
+        getModulesRunBeforeMainModule: jest.fn(() => ['InitializeCore']),
+        getPolyfills: jest.fn(() => ['polyfill']),
+      },
+      transformer: {
+        babelTransformerPath: 'metro-react-native-babel-transformer',
+      },
+      resolver: {},
+      server: {},
+    } as unknown as ConfigT;
+
+    const result = withModuleFederation(config, createHostOptions());
+
+    expect(result).toBe(config);
+    const warning = warnSpy.mock.calls
+      .map(([message]) => String(message))
+      .join('\n');
+    expect(warning).toContain('bundle');
+    expect(warning).toContain('bundle-mf-remote');
+    expect(warning).not.toContain('bundle-mf-host');
+
+    warnSpy.mockRestore();
+  });
+
+  test('rewrites remote entry and manifest requests for remote command', () => {
+    process.argv[2] = 'bundle-mf-remote';
+    const projectRoot = createProjectRoot();
+    tempDirs.push(projectRoot);
+
+    const config = {
+      projectRoot,
+      serializer: {
+        getModulesRunBeforeMainModule: jest.fn(() => ['InitializeCore']),
+        getPolyfills: jest.fn(() => ['polyfill']),
+      },
+      transformer: {
+        babelTransformerPath: 'metro-react-native-babel-transformer',
+      },
+      resolver: {},
+      server: {
+        rewriteRequestUrl: (url: string) => url,
+      },
+    } as unknown as ConfigT;
+
+    const augmented = withModuleFederation(config, createRemoteOptions());
+    const rewrite = augmented.server.rewriteRequestUrl;
+
+    expect(rewrite?.('http://localhost/remoteEntry.bundle')).toContain(
+      `${TMP_DIR_NAME}/remoteEntry.bundle`,
+    );
+    expect(rewrite?.('http://localhost/mf-manifest.json')).toContain(
+      '[metro-project]',
+    );
   });
 
   test('delegates transform options without middleware/setup preconditions', async () => {
