@@ -21,12 +21,6 @@ export function removeExtension(filepath: string) {
   return replaceExtension(filepath, '');
 }
 
-export function stubHostEntry(hostEntryPath: string) {
-  const stub = '// host entry stub';
-  fs.mkdirSync(path.dirname(hostEntryPath), { recursive: true });
-  fs.writeFileSync(hostEntryPath, stub, 'utf-8');
-}
-
 export function stubRemoteEntry(remoteEntryPath: string) {
   const stub = '// remote entry stub';
   fs.mkdirSync(path.dirname(remoteEntryPath), { recursive: true });

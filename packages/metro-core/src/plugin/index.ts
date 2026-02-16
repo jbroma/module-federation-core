@@ -13,7 +13,6 @@ import {
   isUsingMFCommand,
   prepareTmpDir,
   replaceExtension,
-  stubHostEntry,
   stubRemoteEntry,
 } from './helpers';
 import { createManifest } from './manifest';
@@ -22,6 +21,7 @@ import { normalizeOptions } from './normalize-options';
 import { createResolveRequest } from './resolver';
 import { createRewriteRequest } from './rewrite-request';
 import { getModuleFederationSerializer } from './serializer';
+import { getInitHostModule } from './generators';
 import { validateOptions } from './validate-options';
 
 declare global {
@@ -82,16 +82,16 @@ function augmentConfig(
   const { flags } = normalizeExtraOptions(extraOptions);
 
   const vmManager = new VirtualModuleManager(config);
+  vmManager.installMetroPatches();
 
   // original host entrypoint, usually <projectRoot>/index.js
-  const { originalEntryFilename, originalEntryPath } = getOriginalEntry(
+  const { originalEntryPath } = getOriginalEntry(
     config.projectRoot,
     'index.js',
   );
 
-  // virtual host entrypoint
-  const hostEntryFilename = originalEntryFilename;
-  const hostEntryPath = path.resolve(tmpDirPath, hostEntryFilename);
+  // host uses the original entrypoint (no host stub indirection)
+  const hostEntryPath = originalEntryPath;
 
   // virtual remote entrypoint
   const remoteEntryFilename = replaceExtension(options.filename, '.js');
@@ -118,10 +118,15 @@ function augmentConfig(
 
   const manifestPath = createManifest(options, tmpDirPath);
 
-  // host and remote entries are entry points, so they need to be present in the filesystem
-  // we create stubs on the filesystem and then redirect corresponding virtual modules
-  stubHostEntry(hostEntryPath);
+  // remote entry is an entry point, so it needs to be present in the filesystem
+  // we create a stub and then redirect to its virtual module implementation
   stubRemoteEntry(remoteEntryPath);
+
+  if (isHost) {
+    vmManager.registerVirtualModule(initHostPath, () =>
+      getInitHostModule(options),
+    );
+  }
 
   // pass data to bundle-mf-remote command
   global.__METRO_FEDERATION_CONFIG = options;
@@ -138,18 +143,23 @@ function augmentConfig(
         isUsingMFBundleCommand(),
       ),
       getModulesRunBeforeMainModule: (entryFilePath) => {
+        const getModulesRunBeforeMainModule =
+          config.serializer.getModulesRunBeforeMainModule ??
+          (() => [] as Array<string>);
+
         // skip altering the list of modules when unstable_patchInitializeCore is enabled
         if (flags.unstable_patchInitializeCore) {
-          return config.serializer.getModulesRunBeforeMainModule(entryFilePath);
+          return getModulesRunBeforeMainModule(entryFilePath);
         }
         // remove existing pre-modules like InitializeCore for remote entrypoints
         if (isRemote) {
           return [];
         }
-        // prepend init-host to the list of modules to ensure it's run first
+        // prepend host bootstrap modules to ensure they run before app entry
         return [
           initHostPath,
-          ...config.serializer.getModulesRunBeforeMainModule(entryFilePath),
+          asyncRequirePath,
+          ...getModulesRunBeforeMainModule(entryFilePath),
         ];
       },
       getRunModuleStatement: (moduleId: number | string) => {
@@ -173,8 +183,6 @@ function augmentConfig(
         options,
         paths: {
           asyncRequire: asyncRequirePath,
-          originalEntry: originalEntryPath,
-          hostEntry: hostEntryPath,
           initHost: initHostPath,
           remoteModuleRegistry: remoteModuleRegistryPath,
           remoteHMRSetup: remoteHMRSetupPath,
@@ -191,10 +199,8 @@ function augmentConfig(
     },
     server: {
       ...config.server,
-      enhanceMiddleware: vmManager.getMiddleware(),
       rewriteRequestUrl: createRewriteRequest({
         config,
-        originalEntryFilename,
         remoteEntryFilename,
         manifestPath,
         tmpDirPath,
@@ -207,15 +213,11 @@ function getOriginalEntry(
   projectRoot: string,
   entryFilename: string,
 ): {
-  originalEntryFilename: string;
   originalEntryPath: string;
 } {
-  const originalEntryFilename = path.basename(
-    global.__METRO_FEDERATION_ORIGINAL_ENTRY_PATH ?? entryFilename,
-  );
   const originalEntryPath = path.resolve(
     projectRoot,
     global.__METRO_FEDERATION_ORIGINAL_ENTRY_PATH ?? entryFilename,
   );
-  return { originalEntryFilename, originalEntryPath };
+  return { originalEntryPath };
 }

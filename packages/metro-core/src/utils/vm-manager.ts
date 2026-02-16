@@ -6,13 +6,29 @@ import type {
   ServerConfigT,
   TransformerConfigT,
 } from 'metro-config';
-import type { Server as MetroServer } from './metro-compat';
+import { Server, type Server as MetroServer } from './metro-compat';
 
 type EnhanceMiddleware = ServerConfigT['enhanceMiddleware'];
 type GetTransformOptions = TransformerConfigT['getTransformOptions'];
 type Bundler = ReturnType<ReturnType<MetroServer['getBundler']>['getBundler']>;
 type BundlerWithPatchedTransform = Bundler & {
   transformFile: Bundler['transformFile'] & { __vm__patched?: boolean };
+};
+type BundlerWithPatchedDependencyGraph = Bundler & {
+  getDependencyGraph: Bundler['getDependencyGraph'] & {
+    __vm__patched?: boolean;
+  };
+};
+type DependencyGraphWithPatchedReady = {
+  ready?: ((...args: Array<unknown>) => unknown) & { __vm__patched?: boolean };
+};
+type IncrementalBundlerWithPatch = ReturnType<MetroServer['getBundler']> & {
+  getBundler: ReturnType<MetroServer['getBundler']>['getBundler'] & {
+    __vm__patched?: boolean;
+  };
+};
+type MetroServerWithPatchedGetBundler = MetroServer & {
+  getBundler: MetroServer['getBundler'] & { __vm__patched?: boolean };
 };
 
 type VirtualModuleRecord = {
@@ -48,16 +64,39 @@ type MetroWatcherEmitter = {
 };
 
 export class VirtualModuleManager {
+  private static managersByProjectRoot: Map<string, Set<VirtualModuleManager>> =
+    new Map();
+  private static watcherEmittersByProjectRoot: Map<
+    string,
+    MetroWatcherEmitter
+  > = new Map();
+
+  private readonly projectRoot: string;
   private setupFinished: Promise<boolean> | null = null;
   private virtualModules: Map<string, VirtualModuleRecord> = new Map();
-  private watcherEmitter: MetroWatcherEmitter | null = null;
   private pendingVirtualChanges: Array<QueuedVirtualChange> = [];
+  private didInstallPatches = false;
+  private watcherResolutionAttempted = false;
   private didWarnMissingWatcher = false;
 
   constructor(
     private metroConfig: MetroConfig,
     private options: { forceWriteFileSystem?: boolean } = {},
-  ) {}
+  ) {
+    this.projectRoot = metroConfig.projectRoot ?? process.cwd();
+  }
+
+  installMetroPatches(bundler?: Bundler) {
+    if (!this.didInstallPatches) {
+      this.didInstallPatches = true;
+      VirtualModuleManager.registerManager(this);
+      VirtualModuleManager.installServerBundlerPatch();
+    }
+
+    if (bundler) {
+      VirtualModuleManager.patchBundlerInstance(bundler);
+    }
+  }
 
   registerVirtualModule(filePath: string, generator: () => string) {
     const moduleCode = generator();
@@ -111,12 +150,6 @@ export class VirtualModuleManager {
 
   getTransformOptions(): GetTransformOptions {
     return async (...args) => {
-      if (this.setupFinished === null) {
-        throw new Error('Expected virtual module setup to be finished');
-      }
-
-      await this.setupFinished;
-
       const originalGetTransformOptions =
         this.metroConfig.transformer?.getTransformOptions;
 
@@ -128,6 +161,8 @@ export class VirtualModuleManager {
   }
 
   setup(bundler: Bundler) {
+    this.installMetroPatches(bundler);
+
     if (this.setupFinished) {
       return this.setupFinished;
     }
@@ -138,10 +173,24 @@ export class VirtualModuleManager {
 
   private async setupInternal(bundler: Bundler) {
     const graph = await bundler.getDependencyGraph();
-    this.watcherEmitter = this.getWatcherEmitter(graph);
-    this.ensureBundlerPatched(bundler);
+    VirtualModuleManager.captureWatcherEmitter({
+      bundler,
+      graph,
+      markAttempt: true,
+    });
     this.flushPendingVirtualChanges();
     return true;
+  }
+
+  private static registerManager(manager: VirtualModuleManager) {
+    const managers =
+      VirtualModuleManager.managersByProjectRoot.get(manager.projectRoot) ??
+      new Set();
+    managers.add(manager);
+    VirtualModuleManager.managersByProjectRoot.set(
+      manager.projectRoot,
+      managers,
+    );
   }
 
   private createVirtualModuleRecord(
@@ -159,17 +208,14 @@ export class VirtualModuleManager {
   }
 
   private notifyVirtualModuleChange(change: QueuedVirtualChange) {
-    if (this.watcherEmitter) {
-      this.emitWatcherChange(change);
-      return;
-    }
-
-    if (this.setupFinished === null) {
+    const watcherEmitter = this.getWatcherEmitter();
+    if (watcherEmitter) {
+      this.emitWatcherChange(watcherEmitter, change);
       return;
     }
 
     this.pendingVirtualChanges.push(change);
-    void this.setupFinished.then(() => this.flushPendingVirtualChanges());
+    this.flushPendingVirtualChanges();
   }
 
   private flushPendingVirtualChanges() {
@@ -177,7 +223,11 @@ export class VirtualModuleManager {
       return;
     }
 
-    if (!this.watcherEmitter) {
+    const watcherEmitter = this.getWatcherEmitter();
+    if (!watcherEmitter) {
+      if (!this.watcherResolutionAttempted) {
+        return;
+      }
       this.warnMissingWatcherOnce();
       this.pendingVirtualChanges = [];
       return;
@@ -186,16 +236,15 @@ export class VirtualModuleManager {
     const queued = this.pendingVirtualChanges;
     this.pendingVirtualChanges = [];
     for (const change of queued) {
-      this.emitWatcherChange(change);
+      this.emitWatcherChange(watcherEmitter, change);
     }
   }
 
-  private emitWatcherChange(change: QueuedVirtualChange) {
-    if (!this.watcherEmitter) {
-      return;
-    }
-
-    this.watcherEmitter.emit('change', {
+  private emitWatcherChange(
+    watcherEmitter: MetroWatcherEmitter,
+    change: QueuedVirtualChange,
+  ) {
+    watcherEmitter.emit('change', {
       logger: null,
       eventsQueue: [
         {
@@ -211,7 +260,7 @@ export class VirtualModuleManager {
     });
   }
 
-  private getWatcherEmitter(graph: unknown): MetroWatcherEmitter | null {
+  private static getWatcherEmitter(graph: unknown): MetroWatcherEmitter | null {
     const graphWithWatcher = graph as {
       getWatcher?: () => unknown;
       _haste?: unknown;
@@ -232,6 +281,13 @@ export class VirtualModuleManager {
     return null;
   }
 
+  private getWatcherEmitter() {
+    return (
+      VirtualModuleManager.watcherEmittersByProjectRoot.get(this.projectRoot) ??
+      null
+    );
+  }
+
   private warnMissingWatcherOnce() {
     if (this.didWarnMissingWatcher) {
       return;
@@ -244,29 +300,278 @@ export class VirtualModuleManager {
     );
   }
 
-  // Patch the bundler to use virtual modules
-  private ensureBundlerPatched(bundler: Bundler) {
-    const bundlerWithPatch = bundler as BundlerWithPatchedTransform;
-    if (bundlerWithPatch.transformFile.__vm__patched) {
+  private static installServerBundlerPatch() {
+    const serverPrototype = (
+      Server as unknown as {
+        prototype?: MetroServerWithPatchedGetBundler;
+      }
+    ).prototype;
+
+    if (!serverPrototype || typeof serverPrototype.getBundler !== 'function') {
       return;
     }
-    const transformFile = bundlerWithPatch.transformFile.bind(bundler);
 
-    const patchedTransformFile = (async (
-      filePath,
-      transformOptions,
-      fileBuffer,
+    if (serverPrototype.getBundler.__vm__patched) {
+      return;
+    }
+
+    const originalGetBundler = serverPrototype.getBundler;
+    const patchedGetBundler = function (
+      this: MetroServer,
+      ...args: Parameters<MetroServer['getBundler']>
+    ) {
+      const bundlerFactory = originalGetBundler.apply(this, args);
+      VirtualModuleManager.patchIncrementalBundler(bundlerFactory);
+      return bundlerFactory;
+    } as MetroServerWithPatchedGetBundler['getBundler'];
+
+    patchedGetBundler.__vm__patched = true;
+    serverPrototype.getBundler = patchedGetBundler;
+  }
+
+  private static patchIncrementalBundler(
+    incrementalBundler: ReturnType<MetroServer['getBundler']>,
+  ) {
+    const incrementalBundlerWithPatch =
+      incrementalBundler as IncrementalBundlerWithPatch;
+    if (incrementalBundlerWithPatch.getBundler.__vm__patched) {
+      return;
+    }
+
+    const originalGetBundler =
+      incrementalBundlerWithPatch.getBundler.bind(incrementalBundler);
+    const patchedGetBundler = (
+      ...args: Parameters<IncrementalBundlerWithPatch['getBundler']>
     ) => {
-      let buffer = fileBuffer;
-      const virtualModule = this.virtualModules.get(filePath);
+      const bundler = originalGetBundler(...args);
+      VirtualModuleManager.patchBundlerInstance(bundler);
+      return bundler;
+    };
 
-      if (virtualModule) {
-        buffer = virtualModule.buffer;
+    patchedGetBundler.__vm__patched = true;
+    incrementalBundlerWithPatch.getBundler = patchedGetBundler;
+  }
+
+  // Patch the bundler prototype to inject virtual module buffers.
+  private static patchBundlerInstance(bundler: Bundler) {
+    const bundlerPrototype = Object.getPrototypeOf(bundler) as
+      | (BundlerWithPatchedTransform & BundlerWithPatchedDependencyGraph)
+      | undefined;
+
+    if (!bundlerPrototype) {
+      return;
+    }
+
+    if (!bundlerPrototype.transformFile.__vm__patched) {
+      const transformFile = bundlerPrototype.transformFile;
+
+      const patchedTransformFile = async function (
+        this: Bundler,
+        filePath,
+        transformOptions,
+        fileBuffer,
+      ) {
+        if (typeof filePath !== 'string') {
+          return transformFile.call(
+            this,
+            filePath,
+            transformOptions,
+            fileBuffer,
+          );
+        }
+
+        const projectRoot =
+          VirtualModuleManager.getProjectRootFromBundler(this);
+        const virtualModule = VirtualModuleManager.getVirtualModule(
+          projectRoot,
+          filePath,
+        );
+
+        const buffer = virtualModule ? virtualModule.buffer : fileBuffer;
+        return transformFile.call(this, filePath, transformOptions, buffer);
+      } as BundlerWithPatchedTransform['transformFile'];
+
+      patchedTransformFile.__vm__patched = true;
+      bundlerPrototype.transformFile = patchedTransformFile;
+    }
+
+    VirtualModuleManager.patchBundlerDependencyGraph(bundlerPrototype);
+  }
+
+  private static patchBundlerDependencyGraph(
+    bundlerPrototype: BundlerWithPatchedDependencyGraph,
+  ) {
+    if (bundlerPrototype.getDependencyGraph.__vm__patched) {
+      return;
+    }
+
+    const getDependencyGraph = bundlerPrototype.getDependencyGraph;
+
+    const patchedGetDependencyGraph = async function (
+      this: Bundler,
+      ...args: Parameters<Bundler['getDependencyGraph']>
+    ) {
+      const graph = await getDependencyGraph.call(this, ...args);
+      const hasReadyLifecycle =
+        VirtualModuleManager.patchDependencyGraphLifecycle(graph);
+      VirtualModuleManager.captureWatcherEmitter({
+        bundler: this,
+        graph,
+        markAttempt: !hasReadyLifecycle,
+      });
+      return graph;
+    } as BundlerWithPatchedDependencyGraph['getDependencyGraph'];
+
+    patchedGetDependencyGraph.__vm__patched = true;
+    bundlerPrototype.getDependencyGraph = patchedGetDependencyGraph;
+  }
+
+  private static patchDependencyGraphLifecycle(graph: unknown) {
+    const graphWithPatch = graph as DependencyGraphWithPatchedReady;
+    if (typeof graphWithPatch.ready !== 'function') {
+      return false;
+    }
+
+    if (graphWithPatch.ready.__vm__patched) {
+      return true;
+    }
+
+    const ready = graphWithPatch.ready;
+    const patchedReady = async function (
+      this: unknown,
+      ...args: Array<unknown>
+    ) {
+      const result = await ready.apply(this, args);
+      VirtualModuleManager.captureWatcherEmitter({
+        graph: this,
+        markAttempt: true,
+      });
+      return result;
+    } as NonNullable<DependencyGraphWithPatchedReady['ready']>;
+
+    patchedReady.__vm__patched = true;
+    graphWithPatch.ready = patchedReady;
+
+    return true;
+  }
+
+  private static captureWatcherEmitter({
+    bundler,
+    graph,
+    markAttempt,
+  }: {
+    bundler?: Bundler;
+    graph: unknown;
+    markAttempt: boolean;
+  }) {
+    const projectRoot =
+      VirtualModuleManager.getProjectRootFromGraph(graph) ??
+      (bundler
+        ? VirtualModuleManager.getProjectRootFromBundler(bundler)
+        : null);
+
+    if (!projectRoot) {
+      return;
+    }
+
+    const watcherEmitter = VirtualModuleManager.getWatcherEmitter(graph);
+    const managers =
+      VirtualModuleManager.managersByProjectRoot.get(projectRoot);
+
+    if (!managers || managers.size === 0) {
+      return;
+    }
+
+    if (watcherEmitter) {
+      VirtualModuleManager.watcherEmittersByProjectRoot.set(
+        projectRoot,
+        watcherEmitter,
+      );
+      for (const manager of managers) {
+        manager.watcherResolutionAttempted = false;
+        manager.flushPendingVirtualChanges();
       }
-      return transformFile(filePath, transformOptions, buffer);
-    }) as BundlerWithPatchedTransform['transformFile'];
+      return;
+    }
 
-    patchedTransformFile.__vm__patched = true;
-    bundlerWithPatch.transformFile = patchedTransformFile;
+    if (!markAttempt) {
+      return;
+    }
+
+    for (const manager of managers) {
+      manager.watcherResolutionAttempted = true;
+      manager.flushPendingVirtualChanges();
+    }
+  }
+
+  private static getVirtualModule(
+    projectRoot: string | null,
+    filePath: string,
+  ) {
+    if (projectRoot) {
+      const managers =
+        VirtualModuleManager.managersByProjectRoot.get(projectRoot);
+      if (managers) {
+        for (const manager of managers) {
+          const virtualModule = manager.virtualModules.get(filePath);
+          if (virtualModule) {
+            return virtualModule;
+          }
+        }
+      }
+    }
+
+    for (const managers of VirtualModuleManager.managersByProjectRoot.values()) {
+      for (const manager of managers) {
+        const virtualModule = manager.virtualModules.get(filePath);
+        if (virtualModule) {
+          return virtualModule;
+        }
+      }
+    }
+
+    return undefined;
+  }
+
+  private static getProjectRootFromBundler(bundler: unknown): string | null {
+    if (!bundler || typeof bundler !== 'object') {
+      return null;
+    }
+
+    const bundlerWithConfig = bundler as {
+      _config?: { projectRoot?: string };
+      _opts?: { projectRoot?: string };
+      _projectRoot?: string;
+      _depGraph?: { _config?: { projectRoot?: string } };
+    };
+
+    return (
+      bundlerWithConfig._config?.projectRoot ??
+      bundlerWithConfig._opts?.projectRoot ??
+      bundlerWithConfig._projectRoot ??
+      bundlerWithConfig._depGraph?._config?.projectRoot ??
+      null
+    );
+  }
+
+  private static getProjectRootFromGraph(graph: unknown): string | null {
+    if (!graph || typeof graph !== 'object') {
+      return null;
+    }
+
+    const graphWithConfig = graph as {
+      _config?: { projectRoot?: string };
+      _opts?: { projectRoot?: string };
+      _projectRoot?: string;
+      projectRoot?: string;
+    };
+
+    return (
+      graphWithConfig._config?.projectRoot ??
+      graphWithConfig._opts?.projectRoot ??
+      graphWithConfig._projectRoot ??
+      graphWithConfig.projectRoot ??
+      null
+    );
   }
 }

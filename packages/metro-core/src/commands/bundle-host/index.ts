@@ -50,7 +50,7 @@ async function bundleFederatedHost(
     throw new CLIError('Bundling failed');
   }
 
-  // use virtual host entrypoint
+  // use resolved host entrypoint
   args.entryFile = hostEntryFilepath;
 
   const communityCliPlugin = getCommunityCliPlugin(cfg.reactNativePath);
@@ -60,10 +60,10 @@ async function bundleFederatedHost(
 
   return buildBundleWithConfig(args, config, {
     build: async (server: Server, requestOpts: RequestOptions) => {
-      // setup enhance middleware to trigger virtual modules setup
-      config.server.enhanceMiddleware(server.processRequest, server);
+      // invoke user middleware when present
+      config.server.enhanceMiddleware?.(server.processRequest, server);
       const resolver = await createResolver(server, args.platform);
-      // hack: resolve the host entry to register it as a virtual module
+      // prime resolver once so Metro initializes entry-path resolution consistently
       resolver.resolve({
         from: config.projectRoot,
         to: `./${path.relative(config.projectRoot, hostEntryFilepath)}`,

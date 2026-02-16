@@ -197,8 +197,8 @@ async function bundleFederatedRemote(
 
   const server = new Server(config);
 
-  // hack: setup enhance middleware to trigger virtual modules setup
-  config.server.enhanceMiddleware(server.processRequest, server);
+  // invoke user middleware when present
+  config.server.enhanceMiddleware?.(server.processRequest, server);
 
   const resolver = await createResolver(server, args.platform);
 

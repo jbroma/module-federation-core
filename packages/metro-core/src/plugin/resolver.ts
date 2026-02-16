@@ -11,7 +11,6 @@ import {
   REMOTE_MODULE_REGISTRY,
 } from './constants';
 import {
-  getHostEntryModule,
   getInitHostModule,
   getRemoteEntryModule,
   getRemoteHMRSetupModule,
@@ -28,9 +27,7 @@ interface CreateResolveRequestOptions {
   };
   paths: {
     asyncRequire: string;
-    hostEntry: string;
     initHost: string;
-    originalEntry: string;
     remoteEntry: string;
     remoteHMRSetup: string;
     remoteModuleRegistry: string;
@@ -50,27 +47,12 @@ export function createResolveRequest({
   isRemote,
   customResolver,
 }: CreateResolveRequestOptions): CustomResolver {
-  const hostEntryPathRegex = getEntryPathRegex({
-    entry: paths.hostEntry,
-    projectDir: paths.projectDir,
-  });
   const remoteEntryPathRegex = getEntryPathRegex({
     entry: paths.remoteEntry,
     projectDir: paths.projectDir,
   });
 
   return function resolveRequest(context, moduleName, platform) {
-    // virtual entrypoint for host
-    if (moduleName.match(hostEntryPathRegex)) {
-      const hostEntryGenerator = () =>
-        getHostEntryModule(options, {
-          originalEntry: paths.originalEntry,
-          tmpDir: paths.tmpDir,
-        });
-      vmManager.registerVirtualModule(paths.hostEntry, hostEntryGenerator);
-      return { type: 'sourceFile', filePath: paths.hostEntry };
-    }
-
     // virtual entrypoint for remote containers
     if (moduleName.match(remoteEntryPathRegex)) {
       const remoteEntryGenerator = () =>

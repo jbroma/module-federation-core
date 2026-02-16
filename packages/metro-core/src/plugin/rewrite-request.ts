@@ -5,7 +5,6 @@ import { removeExtension } from './helpers';
 
 type CreateRewriteRequestOptions = {
   config: ConfigT;
-  originalEntryFilename: string;
   remoteEntryFilename: string;
   manifestPath: string;
   tmpDirPath: string;
@@ -13,28 +12,20 @@ type CreateRewriteRequestOptions = {
 
 export function createRewriteRequest({
   config,
-  originalEntryFilename,
   remoteEntryFilename,
   manifestPath,
   tmpDirPath,
 }: CreateRewriteRequestOptions) {
-  const hostEntryName = removeExtension(originalEntryFilename);
   const remoteEntryName = removeExtension(remoteEntryFilename);
   const relativeTmpDirPath = path
     .relative(config.projectRoot, tmpDirPath)
     .split(path.sep)
     .join(path.posix.sep);
-  const hostEntryPathRegex = getEntryPathRegex(hostEntryName);
   const remoteEntryPathRegex = getEntryPathRegex(remoteEntryName);
 
   return function rewriteRequest(url: string) {
     const root = config.projectRoot;
     const { pathname } = new URL(url, 'protocol://host');
-    // rewrite /index.bundle -> /<tmp-dir>/index.bundle
-    if (pathname.match(hostEntryPathRegex)) {
-      const target = `${relativeTmpDirPath}/${hostEntryName}`;
-      return url.replace(hostEntryName, target);
-    }
     // rewrite /mini.bundle -> /<tmp-dir>/mini.bundle
     if (pathname.match(remoteEntryPathRegex)) {
       const target = `${relativeTmpDirPath}/${remoteEntryName}`;
