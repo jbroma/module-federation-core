@@ -167,18 +167,18 @@ module.exports = withModuleFederation(
 
 ## CLI 命令
 
-React Native CLI 集成提供了额外的命令来打包联邦应用：
+React Native CLI 集成提供了额外的命令用于远程容器打包：
 
 ### 打包宿主应用
 
-打包消费远程模块的宿主应用：
+使用标准 React Native bundle 命令打包消费远程模块的宿主应用：
 
 ```bash
 # iOS 打包
-react-native bundle-mf-host --entry-file index.js --platform ios
+react-native bundle --entry-file index.js --platform ios
 
 # Android 打包
-react-native bundle-mf-host --entry-file index.js --platform android
+react-native bundle --entry-file index.js --platform android
 ```
 
 ### 打包远程应用
@@ -193,9 +193,9 @@ react-native bundle-mf-remote --platform ios
 react-native bundle-mf-remote --platform android
 ```
 
-这些命令支持与标准 `react-native bundle` 命令相同的所有选项。
+仅在远程/容器拆分场景使用 `bundle-mf-remote`。宿主应用请使用标准 `react-native bundle` 命令。
 
-> **注意**：这些命令由 `@module-federation/metro-plugin-rnc-cli` 包提供。
+> **注意**：自定义的 `bundle-mf-remote` 命令由 `@module-federation/metro-plugin-rnc-cli` 包提供。
 
 ## React Native Enterprise Framework (RNEF) 集成
 

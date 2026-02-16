@@ -1,3 +1,3 @@
-const { bundleMFHostCommand, bundleMFRemoteCommand } = require('./index');
+const { bundleMFRemoteCommand } = require('./index');
 
-module.exports = { commands: [bundleMFHostCommand, bundleMFRemoteCommand] };
+module.exports = { commands: [bundleMFRemoteCommand] };

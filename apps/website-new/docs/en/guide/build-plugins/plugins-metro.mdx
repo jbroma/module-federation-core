@@ -165,18 +165,18 @@ module.exports = withModuleFederation(
 
 ## CLI Commands
 
-The React Native CLI integration provides additional commands for bundling federated applications:
+The React Native CLI integration provides an additional command for remote/container bundling:
 
 ### Bundle Module Federation Host
 
-Bundle a host application that consumes remote modules:
+Bundle a host application that consumes remote modules with the standard React Native bundle command:
 
 ```shell
 # Bundle for iOS
-react-native bundle-mf-host --entry-file index.js --platform ios
+react-native bundle --entry-file index.js --platform ios
 
 # Bundle for Android
-react-native bundle-mf-host --entry-file index.js --platform android
+react-native bundle --entry-file index.js --platform android
 ```
 
 ### Bundle Module Federation Remote
@@ -191,9 +191,9 @@ react-native bundle-mf-remote --platform ios
 react-native bundle-mf-remote --platform android
 ```
 
-Both commands support all the same options as the standard `react-native bundle` command.
+Use `bundle-mf-remote` only for remote/container splitting. For host builds, use the standard `react-native bundle` command.
 
-> **Note**: These commands are provided by the `@module-federation/metro-plugin-rnc-cli` package.
+> **Note**: The custom `bundle-mf-remote` command is provided by the `@module-federation/metro-plugin-rnc-cli` package.
 
 ## React Native Enterprise Framework (RNEF) Integration
 
