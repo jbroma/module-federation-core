@@ -39,6 +39,7 @@
     "@rock-js/platform-android": "^0.13.0",
     "@rock-js/platform-ios": "^0.13.0",
     "@rock-js/plugin-metro": "^0.13.0",
+    "@rock-js/provider-github": "^0.13.0",
     "@types/jest": "^29.5.13",
     "@types/lodash": "^4",
     "@types/react": "^19.1.0",
