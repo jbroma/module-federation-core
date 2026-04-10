@@ -1,0 +1,491 @@
+name: 'Rock Remote Build - iOS'
+description: 'Local fork of callstackincubator/ios@v3 with working-directory fix'
+
+inputs:
+  github-token:
+    description: GitHub Token
+    required: true
+  working-directory:
+    description: 'Working directory for the build command'
+    required: false
+    default: '.'
+  destination:
+    description: 'Destination to build to: "simulator" or "device". Using "device" runs "rock build:ios --archive" and code signing settings (certificate file/base64, provisioning profile file/base64, certificate password, keychain password) are required.'
+    required: true
+    default: 'simulator'
+  scheme:
+    description: Xcode scheme
+    required: true
+  configuration:
+    description: Xcode configuration
+    required: true
+  re-sign:
+    description: Re-sign IPA with new JS bundle. No signing is done for APP bundle (destination == simulator).
+    required: false
+  ad-hoc:
+    description: 'Upload the IPA for ad-hoc distribution to easily install on provisioned devices'
+    required: false
+    default: false
+  certificate-file:
+    description: '[Device Builds] Path to P12 file containing Apple certificate (incl. private key)'
+    required: false
+  certificate-base64:
+    description: '[Device Builds] Base64 encoded P12 file containing Apple certificate (incl. private key)'
+    required: false
+  certificate-password:
+    description: '[Device Builds] Password for the P12 file containing the Apple certificate'
+    required: false
+  provisioning-profile-file:
+    description: '[Device Builds] Path to Apple provisioning profile (*.mobileprovision)'
+    required: false
+  provisioning-profile-base64:
+    description: '[Device Builds] Base64 encoded Apple provisioning profile (*.mobileprovision)'
+    required: false
+  provisioning-profile-name:
+    description: '[Device Builds] Name of the Apple provisioning profile (without .mobileprovision extension)'
+    required: false
+  keychain-password:
+    description: '[Device Builds] Password that will protect temporary keychain used for signing (can be a random string)'
+    required: false
+  provisioning-profiles:
+    description: '[Device Builds] JSON array of provisioning profiles'
+    required: false
+  rock-build-extra-params:
+    description: 'Extra parameters to pass to "rock build:ios"'
+    required: false
+  comment-bot:
+    description: 'Whether to send a comment under PR with the link to the generated build'
+    required: false
+    default: true
+
+outputs:
+  artifact-url:
+    description: 'URL of the relevant iOS build artifact (could be cached)'
+    value: ${{ steps.upload-artifact.outputs.artifact-url || env.ARTIFACT_URL }}
+  artifact-id:
+    description: 'ID of the relevant iOS build artifact (could be cached)'
+    value: ${{ steps.upload-artifact.outputs.artifact-id || env.ARTIFACT_ID }}
+
+runs:
+  using: 'composite'
+  steps:
+    - name: Validate inputs
+      run: |
+        if [ "${{ inputs.destination }}" != "simulator" ] && [ "${{ inputs.destination }}" != "device" ]; then
+          echo "Invalid input 'destination': '${{ inputs.destination }}'. Allowed values: 'simulator' or 'device'."
+          exit 1
+        fi
+
+        if [ "${{ inputs.destination }}" == "device" ]; then
+          if [ -n "${{ inputs.certificate-file }}" ] && [ -n "${{ inputs.certificate-base64 }}" ]; then
+            echo "Cannot specify both 'certificate-file' and 'certificate-base64'. Use one or the other."
+            exit 1
+          fi
+
+          if [ -z "${{ inputs.certificate-file }}" ] && [ -z "${{ inputs.certificate-base64 }}" ]; then
+            echo "Either 'certificate-file' or 'certificate-base64' is required for device builds."
+            exit 1
+          fi
+
+          if [ -n "${{ inputs.certificate-file }}" ]; then
+            if [ ! -f "${{ inputs.certificate-file }}" ]; then
+              echo "Certificate file not found: '${{ inputs.certificate-file }}'"
+              exit 1
+            fi
+          fi
+
+          PROVISIONING_PROFILES='${{ inputs.provisioning-profiles }}'
+          if [ -z "$PROVISIONING_PROFILES" ]; then
+            if [ -n "${{ inputs.provisioning-profile-file }}" ] && [ -n "${{ inputs.provisioning-profile-base64 }}" ]; then
+              echo "Cannot specify both 'provisioning-profile-file' and 'provisioning-profile-base64'. Use one or the other."
+              exit 1
+            fi
+
+            if [ -z "${{ inputs.provisioning-profile-file }}" ] && [ -z "${{ inputs.provisioning-profile-base64 }}" ]; then
+              echo "Either 'provisioning-profile-file' or 'provisioning-profile-base64' is required for device builds when not using 'provisioning-profiles'."
+              exit 1
+            fi
+
+            if [ -n "${{ inputs.provisioning-profile-file }}" ]; then
+              if [ ! -f "${{ inputs.provisioning-profile-file }}" ]; then
+                echo "Provisioning profile file not found: '${{ inputs.provisioning-profile-file }}'"
+                exit 1
+              fi
+            fi
+          fi
+
+          if [ -z "${{ inputs.provisioning-profile-name }}" ] && [ -z "$PROVISIONING_PROFILES" ]; then
+            echo "Either 'provisioning-profile-name' or 'provisioning-profiles' is required for device builds."
+            exit 1
+          fi
+
+          if [ -n "${{ inputs.provisioning-profile-name }}" ] && [ -n "$PROVISIONING_PROFILES" ]; then
+            echo "Cannot specify both 'provisioning-profile-name' and 'provisioning-profiles'. Use one or the other."
+            exit 1
+          fi
+
+          if [ -n "$PROVISIONING_PROFILES" ]; then
+            while IFS= read -r profile; do
+              name="$(echo "$profile" | jq -r '.name')"
+              file_path="$(echo "$profile" | jq -r '.file // empty')"
+              base64_content="$(echo "$profile" | jq -r '.base64 // empty')"
+
+              if [ -z "$name" ]; then
+                echo "Provisioning profile missing 'name' field"
+                exit 1
+              fi
+
+              if [ -n "$file_path" ] && [ -n "$base64_content" ]; then
+                printf "Cannot specify both 'file' and 'base64' for profile: %s\n" "$name"
+                exit 1
+              fi
+
+              if [ -z "$file_path" ] && [ -z "$base64_content" ]; then
+                printf "Either 'file' or 'base64' is required for profile: %s\n" "$name"
+                exit 1
+              fi
+
+              if [ -n "$file_path" ] && [ ! -f "$file_path" ]; then
+                printf "Provisioning profile file not found: %s\n" "$file_path"
+                exit 1
+              fi
+            done < <(echo "$PROVISIONING_PROFILES" | jq -c '.[]')
+          fi
+        fi
+      shell: bash
+
+    - name: Native Fingerprint
+      id: fingerprint
+      run: |
+        FINGERPRINT_OUTPUT=$(npx rock fingerprint -p ios --raw) || (echo "$FINGERPRINT_OUTPUT" && exit 1)
+        echo "FINGERPRINT=$FINGERPRINT_OUTPUT" >> $GITHUB_ENV
+      shell: bash
+      working-directory: ${{ inputs.working-directory }}
+
+    - name: Get Provider Name
+      run: |
+        PROVIDER_NAME=$(npx rock remote-cache get-provider-name) || (echo "$PROVIDER_NAME" && exit 1)
+        echo "PROVIDER_NAME=$PROVIDER_NAME" >> $GITHUB_ENV
+      shell: bash
+      working-directory: ${{ inputs.working-directory }}
+
+    - name: Populate GitHub Token in Cache
+      if: ${{ env.PROVIDER_NAME == 'GitHub' }}
+      run: |
+        mkdir -p .rock/cache
+        echo "{\"githubToken\": \"${{ inputs.github-token }}\"}" > .rock/cache/project.json
+      shell: bash
+      working-directory: ${{ inputs.working-directory }}
+
+    - name: Check if PR-related artifact exists
+      if: ${{ github.event_name == 'pull_request' && inputs.re-sign == 'true' }}
+      run: |
+        ARTIFACT_TRAITS="${{ inputs.destination }},${{ inputs.configuration }},${{ github.event.pull_request.number}}"
+        echo "ARTIFACT_TRAITS=$ARTIFACT_TRAITS" >> $GITHUB_ENV
+
+        OUTPUT=$(npx rock remote-cache list -p ios --traits "${ARTIFACT_TRAITS}" --json) || (echo "$OUTPUT" && exit 1)
+        if [ "$OUTPUT" ]; then
+          echo "ARTIFACT_URL=$(echo "$OUTPUT" | jq -r '.url')" >> $GITHUB_ENV
+          echo "ARTIFACT_ID=$(echo "$OUTPUT" | jq -r '.id')" >> $GITHUB_ENV
+          echo "ARTIFACT_NAME=$(echo "$OUTPUT" | jq -r '.name')" >> $GITHUB_ENV
+        fi
+      shell: bash
+      working-directory: ${{ inputs.working-directory }}
+
+    - name: Check if regular artifact exists
+      if: ${{ !env.ARTIFACT_NAME }}
+      run: |
+        ARTIFACT_TRAITS="${{ inputs.destination }},${{ inputs.configuration }}"
+        echo "ARTIFACT_TRAITS=$ARTIFACT_TRAITS" >> $GITHUB_ENV
+
+        OUTPUT=$(npx rock remote-cache list -p ios --traits "${ARTIFACT_TRAITS}" --json) || (echo "$OUTPUT" && exit 1)
+        if [ "$OUTPUT" ]; then
+          echo "ARTIFACT_URL=$(echo "$OUTPUT" | jq -r '.url')" >> $GITHUB_ENV
+          echo "ARTIFACT_ID=$(echo "$OUTPUT" | jq -r '.id')" >> $GITHUB_ENV
+          echo "ARTIFACT_NAME=$(echo "$OUTPUT" | jq -r '.name')" >> $GITHUB_ENV
+        fi
+      shell: bash
+      working-directory: ${{ inputs.working-directory }}
+
+    - name: Set Artifact Name (if not set)
+      if: ${{ !env.ARTIFACT_NAME }}
+      run: |
+        ARTIFACT_TRAITS_HYPHENATED=$(echo "$ARTIFACT_TRAITS" | tr ',' '-')
+        ARTIFACT_TRAITS_HYPHENATED_FINGERPRINT="${ARTIFACT_TRAITS_HYPHENATED}-${FINGERPRINT}"
+        echo "ARTIFACT_NAME=rock-ios-${ARTIFACT_TRAITS_HYPHENATED_FINGERPRINT}" >> $GITHUB_ENV
+      shell: bash
+
+    - name: Set Provisioning Profile Path
+      run: |
+        echo "PROFILE_DIR=$HOME/Library/MobileDevice/Provisioning Profiles" >> $GITHUB_ENV
+      shell: bash
+
+    - name: Setup Code Signing (device builds only)
+      if: ${{ inputs.re-sign == 'true' && inputs.destination == 'device' || (!env.ARTIFACT_URL && inputs.destination == 'device') }}
+      run: |
+        PROVISIONING_PROFILES='${{ inputs.provisioning-profiles }}'
+
+        KEYCHAIN_PATH=$RUNNER_TEMP/app-signing.keychain-db
+
+        KEYCHAIN_PASSWORD="${{ inputs.keychain-password }}"
+        if [ -z "$KEYCHAIN_PASSWORD" ]; then
+          KEYCHAIN_PASSWORD=$(openssl rand -base64 32)
+        fi
+
+        security create-keychain -p "$KEYCHAIN_PASSWORD" $KEYCHAIN_PATH
+        security set-keychain-settings -lut 21600 $KEYCHAIN_PATH
+        security unlock-keychain -p "$KEYCHAIN_PASSWORD" $KEYCHAIN_PATH
+
+        CERTIFICATE_PATH=$RUNNER_TEMP/certificate.p12
+
+        if [ -n "${{ inputs.certificate-file }}" ]; then
+          cp "${{ inputs.certificate-file }}" "$CERTIFICATE_PATH"
+        else
+          echo -n "${{ inputs.certificate-base64 }}" | base64 --decode -o "$CERTIFICATE_PATH"
+        fi
+
+        if [ -n "${{ inputs.certificate-password }}" ]; then
+          SECURITY_IMPORT_ERROR=$(security import "$CERTIFICATE_PATH" -P "${{ inputs.certificate-password }}" -A -t cert -f pkcs12 -k "$KEYCHAIN_PATH" 2>&1)
+          if [ $? -ne 0 ]; then
+            echo "Certificate import failed with provided password."
+            echo "Error output from 'security import':"
+            echo "$SECURITY_IMPORT_ERROR"
+            exit 1
+          fi
+        else
+          SECURITY_IMPORT_ERROR=$(security import "$CERTIFICATE_PATH" -A -t cert -f pkcs12 -k "$KEYCHAIN_PATH" 2>&1)
+          SECURITY_IMPORT_EXIT_CODE=$?
+          if [ $SECURITY_IMPORT_EXIT_CODE -ne 0 ]; then
+            echo "Certificate import failed. If this P12 file requires a password, please provide 'certificate-password' input."
+            echo "Error output from 'security import':"
+            echo "$SECURITY_IMPORT_ERROR"
+            exit 1
+          fi
+        fi
+
+        security set-key-partition-list -S apple-tool:,apple: -k "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH" >/dev/null
+        security list-keychain -d user -s "$KEYCHAIN_PATH" >/dev/null
+
+        IDENTITY=$(security find-identity -v -p codesigning "$KEYCHAIN_PATH" | grep -oE '([0-9A-F]{40})' | head -n 1)
+        echo "Using signing identity (SHA-1): ${IDENTITY:0:8}…"
+        echo "IDENTITY=$IDENTITY" >> "$GITHUB_ENV"
+
+        PROFILE_DIR="$HOME/Library/MobileDevice/Provisioning Profiles"
+        mkdir -p "$PROFILE_DIR"
+
+        if [ -n "${{ inputs.provisioning-profile-name }}" ]; then
+          PROFILE_PATH="$PROFILE_DIR/${{ inputs.provisioning-profile-name }}.mobileprovision"
+
+          if [ -n "${{ inputs.provisioning-profile-file }}" ]; then
+            cp "${{ inputs.provisioning-profile-file }}" "$PROFILE_PATH"
+          else
+            echo -n "${{ inputs.provisioning-profile-base64 }}" | base64 --decode -o "$PROFILE_PATH"
+          fi
+        fi
+
+        if [ -n "$PROVISIONING_PROFILES" ]; then
+          while IFS= read -r profile; do
+            name="$(echo "$profile" | jq -r '.name')"
+            file_path="$(echo "$profile" | jq -r '.file // empty')"
+            base64_content="$(echo "$profile" | jq -r '.base64 // empty')"
+
+            ADDITIONAL_PROFILE_PATH="$PROFILE_DIR/${name}.mobileprovision"
+
+            if [ -n "$file_path" ]; then
+              cp "$file_path" "$ADDITIONAL_PROFILE_PATH"
+            else
+              echo -n "$base64_content" | base64 --decode -o "$ADDITIONAL_PROFILE_PATH"
+            fi
+
+            printf "Installed provisioning profile: %s\n" "$name"
+          done < <(echo "$PROVISIONING_PROFILES" | jq -c '.[]')
+        fi
+      shell: bash
+
+    - name: Determine iOS sourceDir
+      if: ${{ !env.ARTIFACT_URL }}
+      run: |
+        JSON_OUTPUT=$(npx rock config -p ios) || (echo "$JSON_OUTPUT" && exit 1)
+        echo "$JSON_OUTPUT" | jq -r '.project'
+        IOS_SOURCE_DIR=$(echo "$JSON_OUTPUT" | jq -r '.project.ios.sourceDir')
+        echo "IOS_SOURCE_DIR=$IOS_SOURCE_DIR" >> $GITHUB_ENV
+      shell: bash
+      working-directory: ${{ inputs.working-directory }}
+
+    - name: Build iOS
+      if: ${{ !env.ARTIFACT_URL }}
+      run: |
+        npx rock build:ios \
+          ${{ inputs.destination == 'device' && '--archive' || '' }} \
+          --scheme "${{ inputs.scheme }}" \
+          --configuration "${{ inputs.configuration }}" \
+          --build-folder build \
+          --destination ${{ inputs.destination }} \
+          --verbose \
+          ${{ inputs.rock-build-extra-params }}
+      shell: bash
+      working-directory: ${{ inputs.working-directory }}
+
+    - name: Find Build Artifact
+      if: ${{ !env.ARTIFACT_URL }}
+      run: |
+        if [ "${{ inputs.destination }}" == "device" ]; then
+          IPA_PATH=$(find .rock/cache/ios/export -maxdepth 1 -name '*.ipa' -type f | head -1)
+          echo IPA_PATH $IPA_PATH
+          echo "ARTIFACT_PATH=$IPA_PATH" >> $GITHUB_ENV
+        else
+          APP_PATH=$(find $IOS_SOURCE_DIR/build -name '*.app' -type d | head -1 )
+          APP_DIR=$(dirname "$APP_PATH")
+          APP_BASENAME=$(basename "$APP_PATH")
+
+          ARTIFACT_PATH="$APP_DIR/app.tar.gz"
+          tar -C "$APP_DIR" -czvf "$ARTIFACT_PATH" "$APP_BASENAME"
+
+          echo "ARTIFACT_PATH=$ARTIFACT_PATH" >> $GITHUB_ENV
+        fi
+      shell: bash
+      working-directory: ${{ inputs.working-directory }}
+
+    - name: Download and Unpack IPA
+      if: ${{ env.ARTIFACT_URL && inputs.destination == 'device' && inputs.re-sign == 'true' }}
+      run: |
+        DOWNLOAD_OUTPUT=$(npx rock remote-cache download --name ${{ env.ARTIFACT_NAME }} --json) || (echo "$DOWNLOAD_OUTPUT" && exit 1)
+        IPA_PATH=$(echo "$DOWNLOAD_OUTPUT" | jq -r '.path')
+        echo "ARTIFACT_PATH=$IPA_PATH" >> $GITHUB_ENV
+      shell: bash
+      working-directory: ${{ inputs.working-directory }}
+
+    - name: Download and Unpack APP
+      if: ${{ env.ARTIFACT_URL && inputs.destination == 'simulator' && inputs.re-sign == 'true' }}
+      run: |
+        DOWNLOAD_OUTPUT=$(npx rock remote-cache download --name ${{ env.ARTIFACT_NAME }} --json) || (echo "$DOWNLOAD_OUTPUT" && exit 1)
+        APP_PATH=$(echo "$DOWNLOAD_OUTPUT" | jq -r '.path')
+        APP_DIR=$(dirname "$APP_PATH")
+        APP_BASENAME=$(basename "$APP_PATH")
+
+        tar -C "$APP_DIR" -xzf "$APP_PATH"
+        EXTRACTED_APP=$(find "$APP_DIR" -name "*.app" -type d | head -1)
+
+        echo "ARTIFACT_PATH=$APP_PATH" >> $GITHUB_ENV
+        echo "ARTIFACT_TAR_PATH=$EXTRACTED_APP" >> $GITHUB_ENV
+      shell: bash
+      working-directory: ${{ inputs.working-directory }}
+
+    - name: Re-sign IPA
+      if: ${{ env.ARTIFACT_URL && inputs.destination == 'device' && inputs.re-sign == 'true' }}
+      run: |
+        npx rock sign:ios "${{ env.ARTIFACT_PATH }}" \
+          --build-jsbundle \
+          --identity ${{ env.IDENTITY }}
+      shell: bash
+      working-directory: ${{ inputs.working-directory }}
+
+    - name: Re-bundle APP
+      if: ${{ env.ARTIFACT_URL && inputs.destination == 'simulator' && inputs.re-sign == 'true' }}
+      run: |
+        npx rock sign:ios "${{ env.ARTIFACT_TAR_PATH }}" \
+          --build-jsbundle \
+          --app
+      shell: bash
+      working-directory: ${{ inputs.working-directory }}
+
+    - name: Update Artifact Name for re-signed builds
+      if: ${{ env.ARTIFACT_URL && inputs.re-sign == 'true' }}
+      run: |
+        if [ "${{ github.event_name }}" = "pull_request" ]; then
+          IDENTIFIER="${{ github.event.pull_request.number }}"
+        else
+          IDENTIFIER=$(echo "$GITHUB_SHA" | cut -c1-7)
+        fi
+        ARTIFACT_TRAITS="${{ inputs.destination }},${{ inputs.configuration }},${IDENTIFIER}"
+        ARTIFACT_TRAITS_HYPHENATED=$(echo "$ARTIFACT_TRAITS" | tr ',' '-')
+        ARTIFACT_TRAITS_HYPHENATED_FINGERPRINT="${ARTIFACT_TRAITS_HYPHENATED}-${FINGERPRINT}"
+        echo "ARTIFACT_NAME=rock-ios-${ARTIFACT_TRAITS_HYPHENATED_FINGERPRINT}" >> $GITHUB_ENV
+        echo "ARTIFACT_TRAITS=$ARTIFACT_TRAITS" >> $GITHUB_ENV
+      shell: bash
+
+    - name: Find artifact URL again before uploading
+      run: |
+        OUTPUT=$(npx rock remote-cache list --name ${{ env.ARTIFACT_NAME }} --json) || (echo "$OUTPUT" && exit 1)
+        if [ -z "$OUTPUT" ]; then
+          echo "No artifact found"
+        else
+          echo "ARTIFACT_URL=$(echo "$OUTPUT" | jq -r '.url')" >> $GITHUB_ENV
+          echo "ARTIFACT_ID=$(echo "$OUTPUT" | jq -r '.id')" >> $GITHUB_ENV
+        fi
+      shell: bash
+      working-directory: ${{ inputs.working-directory }}
+
+    - name: Upload Artifact to GitHub
+      id: upload-artifact
+      if: ${{ env.PROVIDER_NAME == 'GitHub' && (!env.ARTIFACT_URL || inputs.re-sign == 'true') }}
+      uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+      with:
+        name: ${{ env.ARTIFACT_NAME }}
+        path: ${{ env.ARTIFACT_PATH }}
+        if-no-files-found: error
+
+    - name: Upload Artifact to Remote Cache for re-signed builds
+      if: ${{ env.PROVIDER_NAME != 'GitHub' && inputs.re-sign == 'true' }}
+      run: |
+        OUTPUT=$(npx rock remote-cache upload --name ${{ env.ARTIFACT_NAME }} --binary-path ${{ env.ARTIFACT_PATH }} --json) || (echo "$OUTPUT" && exit 1)
+        echo "ARTIFACT_URL=$(echo "$OUTPUT" | jq -r '.url')" >> $GITHUB_ENV
+      shell: bash
+      working-directory: ${{ inputs.working-directory }}
+
+    - name: Upload Artifact to Remote Cache for regular builds
+      if: ${{ env.PROVIDER_NAME != 'GitHub' && inputs.re-sign != 'true' && !env.ARTIFACT_URL }}
+      run: |
+        OUTPUT=$(npx rock remote-cache upload --name ${{ env.ARTIFACT_NAME }} --json) || (echo "$OUTPUT" && exit 1)
+        echo "ARTIFACT_URL=$(echo "$OUTPUT" | jq -r '.url')" >> $GITHUB_ENV
+      shell: bash
+      working-directory: ${{ inputs.working-directory }}
+
+    - name: Upload for Ad-hoc distribution
+      if: ${{ env.PROVIDER_NAME != 'GitHub' && inputs.ad-hoc == 'true' }}
+      run: |
+        OUTPUT=$(npx rock remote-cache upload --name ${{ env.ARTIFACT_NAME }} --binary-path ${{ env.ARTIFACT_PATH }} --json --ad-hoc) || (echo "$OUTPUT" && exit 1)
+        echo "ARTIFACT_URL=$(echo "$OUTPUT" | jq -r '.url')" >> $GITHUB_ENV
+      shell: bash
+      working-directory: ${{ inputs.working-directory }}
+
+    - name: Delete Old Re-Signed Artifacts
+      if: ${{ env.ARTIFACT_URL && inputs.re-sign == 'true' && github.event_name == 'pull_request' }}
+      run: |
+        npx rock remote-cache delete --name ${{ env.ARTIFACT_NAME }} --all-but-latest --json
+      shell: bash
+      working-directory: ${{ inputs.working-directory }}
+
+    - name: Clean Up Code Signing (device builds only)
+      if: ${{ inputs.re-sign == 'true' && inputs.destination == 'device' || (!env.ARTIFACT_URL && inputs.destination == 'device') }}
+      run: |
+        PROVISIONING_PROFILES='${{ inputs.provisioning-profiles }}'
+
+        KEYCHAIN_PATH=$RUNNER_TEMP/app-signing.keychain-db
+        security delete-keychain "$KEYCHAIN_PATH"
+
+        CERTIFICATE_PATH=$RUNNER_TEMP/certificate.p12
+        rm "$CERTIFICATE_PATH"
+
+        if [ -n "${{ inputs.provisioning-profile-name }}" ]; then
+          PROFILE_DIR="$HOME/Library/MobileDevice/Provisioning Profiles"
+          PROFILE_PATH="$PROFILE_DIR/${{ inputs.provisioning-profile-name }}.mobileprovision"
+          rm "$PROFILE_PATH"
+        fi
+
+        if [ -n "$PROVISIONING_PROFILES" ]; then
+          PROFILE_DIR="$HOME/Library/MobileDevice/Provisioning Profiles"
+          while IFS= read -r profile; do
+            name="$(echo "$profile" | jq -r '.name')"
+            PROFILE_PATH="$PROFILE_DIR/${name}.mobileprovision"
+            rm "$PROFILE_PATH"
+            printf "Cleaned up provisioning profile: %s\n" "$name"
+          done < <(echo "$PROVISIONING_PROFILES" | jq -c '.[]')
+        fi
+      shell: bash
+
+    - name: Cleanup Cache
+      run: |
+        rm -rf .rock/cache/project.json
+      shell: bash
+      working-directory: ${{ inputs.working-directory }}
