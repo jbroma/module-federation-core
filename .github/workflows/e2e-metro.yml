@@ -121,15 +121,15 @@ jobs:
           echo "${HOME}/.maestro/bin" >> "$GITHUB_PATH"
         shell: bash
 
-      - name: Configure RNEF cache auth
+      - name: Configure Rock cache auth
         shell: bash
         run: |
-          RNEF_PATH="apps/metro-${{ env.METRO_APP_NAME }}/.rnef/cache"
-          mkdir -p "$RNEF_PATH"
-          echo "{\"githubToken\": \"${{ secrets.GITHUB_TOKEN }}\"}" > "$RNEF_PATH/project.json"
+          ROCK_PATH="apps/metro-${{ env.METRO_APP_NAME }}/.rock/cache"
+          mkdir -p "$ROCK_PATH"
+          echo "{\"githubToken\": \"${{ secrets.GITHUB_TOKEN }}\"}" > "$ROCK_PATH/project.json"
 
-      - name: Build Metro Android app (RNEF action)
-        uses: callstackincubator/android@v1
+      - name: Build Metro Android app (Rock action)
+        uses: callstackincubator/android@v3
         with:
           github-token: ${{ secrets.GITHUB_TOKEN }}
           comment-bot: false
@@ -152,7 +152,7 @@ jobs:
           disable-animations: true
           emulator-options: -no-snapshot-save -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -camera-back none
           script: |
-            node tools/scripts/run-metro-e2e.mjs --platform=android --appName=${{ env.METRO_APP_NAME }} --skip-rnef-cache-auth
+            node tools/scripts/run-metro-e2e.mjs --platform=android --appName=${{ env.METRO_APP_NAME }} --skip-rock-cache-auth
 
       - name: Upload Android Maestro logs on failure
         if: failure()
@@ -221,15 +221,15 @@ jobs:
           echo "${HOME}/.maestro/bin" >> "$GITHUB_PATH"
         shell: bash
 
-      - name: Configure RNEF cache auth
+      - name: Configure Rock cache auth
         shell: bash
         run: |
-          RNEF_PATH="apps/metro-${{ env.METRO_APP_NAME }}/.rnef/cache"
-          mkdir -p "$RNEF_PATH"
-          echo "{\"githubToken\": \"${{ secrets.GITHUB_TOKEN }}\"}" > "$RNEF_PATH/project.json"
+          ROCK_PATH="apps/metro-${{ env.METRO_APP_NAME }}/.rock/cache"
+          mkdir -p "$ROCK_PATH"
+          echo "{\"githubToken\": \"${{ secrets.GITHUB_TOKEN }}\"}" > "$ROCK_PATH/project.json"
 
-      - name: Build Metro iOS app (RNEF action)
-        uses: callstackincubator/ios@v1
+      - name: Build Metro iOS app (Rock action)
+        uses: callstackincubator/ios@v3
         with:
           github-token: ${{ secrets.GITHUB_TOKEN }}
           comment-bot: false
@@ -241,7 +241,7 @@ jobs:
       - name: Run Metro iOS E2E tests
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: node tools/scripts/run-metro-e2e.mjs --platform=ios --appName=${{ env.METRO_APP_NAME }} --skip-rnef-cache-auth
+        run: node tools/scripts/run-metro-e2e.mjs --platform=ios --appName=${{ env.METRO_APP_NAME }} --skip-rock-cache-auth
         shell: bash
 
       - name: Upload iOS Maestro logs on failure
