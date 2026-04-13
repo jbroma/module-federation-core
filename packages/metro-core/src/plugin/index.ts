@@ -153,6 +153,7 @@ function augmentConfig(
       customSerializer: getModuleFederationSerializer(
         options,
         isUsingMFBundleCommand(),
+        manifestPath,
       ),
       getModulesRunBeforeMainModule: (entryFilePath) => {
         // skip altering the list of modules when unstable_patchInitializeCore is enabled
