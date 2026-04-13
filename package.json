@@ -165,7 +165,7 @@
     "adm-zip": "0.5.16",
     "ansi-colors": "4.1.3",
     "antd": "5.19.1",
-    "axios": "1.13.5",
+    "axios": "1.15.0",
     "core-js": "3.36.1",
     "encoding": "^0.1.13",
     "express": "5.2.1",
@@ -179,7 +179,7 @@
     "storybook": "8.6.17",
     "tapable": "2.3.0",
     "typedoc": "0.28.17",
-    "undici": "7.18.2",
+    "undici": "7.24.7",
     "unplugin": "3.0.0"
   },
   "devDependencies": {
