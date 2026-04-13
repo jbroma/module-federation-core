@@ -129,10 +129,8 @@ jobs:
           mkdir -p "$ROCK_PATH"
           echo "{\"githubToken\": \"${{ secrets.GITHUB_TOKEN }}\"}" > "$ROCK_PATH/project.json"
 
-      # TODO: working-directory not propagated to all steps in upstream action
-      # https://github.com/callstackincubator/android/pull/25
       - name: Build Metro Android app (Rock action)
-        uses: callstackincubator/android@v3
+        uses: callstackincubator/android@599c4a7 # v3 + working-directory fix (callstackincubator/android#25)
         with:
           github-token: ${{ secrets.GITHUB_TOKEN }}
           comment-bot: false
@@ -232,10 +230,8 @@ jobs:
           mkdir -p "$ROCK_PATH"
           echo "{\"githubToken\": \"${{ secrets.GITHUB_TOKEN }}\"}" > "$ROCK_PATH/project.json"
 
-      # TODO: working-directory not propagated to all steps in upstream action
-      # https://github.com/callstackincubator/ios/pull/27
       - name: Build Metro iOS app (Rock action)
-        uses: callstackincubator/ios@v3
+        uses: callstackincubator/ios@a5f0126 # v3 + working-directory fix (callstackincubator/ios#27)
         with:
           github-token: ${{ secrets.GITHUB_TOKEN }}
           comment-bot: false
