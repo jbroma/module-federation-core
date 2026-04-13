@@ -130,7 +130,7 @@ jobs:
           echo "{\"githubToken\": \"${{ secrets.GITHUB_TOKEN }}\"}" > "$ROCK_PATH/project.json"
 
       - name: Build Metro Android app (Rock action)
-        uses: callstackincubator/android@599c4a7 # v3
+        uses: callstackincubator/android@599c4a7f0f78cbb1b3fdcd3aea220ee9fbb7e973 # v3
         with:
           github-token: ${{ secrets.GITHUB_TOKEN }}
           comment-bot: false
@@ -231,7 +231,7 @@ jobs:
           echo "{\"githubToken\": \"${{ secrets.GITHUB_TOKEN }}\"}" > "$ROCK_PATH/project.json"
 
       - name: Build Metro iOS app (Rock action)
-        uses: callstackincubator/ios@a5f0126 # v3
+        uses: callstackincubator/ios@a5f0126bfe03817e2951b29111d75fbd352de0a7 # v3
         with:
           github-token: ${{ secrets.GITHUB_TOKEN }}
           comment-bot: false
