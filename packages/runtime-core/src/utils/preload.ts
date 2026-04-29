@@ -20,7 +20,6 @@ export function defaultPreloadArgs(
     resourceCategory: 'sync',
     share: true,
     depsRemote: true,
-    prefetchInterface: false,
     ...preloadConfig,
   } as PreloadConfig;
 }
@@ -108,6 +107,7 @@ export function preloadAssets(
             const res = host.loaderHook.lifecycle.createLink.emit({
               url,
               attrs,
+              remoteInfo,
             });
             if (res instanceof HTMLLinkElement) {
               return res;
@@ -134,6 +134,7 @@ export function preloadAssets(
             const res = host.loaderHook.lifecycle.createLink.emit({
               url,
               attrs,
+              remoteInfo,
             });
             if (res instanceof HTMLLinkElement) {
               return res;
@@ -163,6 +164,7 @@ export function preloadAssets(
             const res = host.loaderHook.lifecycle.createLink.emit({
               url,
               attrs,
+              remoteInfo,
             });
             if (res instanceof HTMLLinkElement) {
               return res;
@@ -188,6 +190,7 @@ export function preloadAssets(
             const res = host.loaderHook.lifecycle.createScript.emit({
               url,
               attrs,
+              remoteInfo,
             });
             if (res instanceof HTMLScriptElement) {
               return res;

@@ -1,5 +1,22 @@
 # @module-federation/cli
 
+## 2.4.0
+
+### Patch Changes
+
+- Updated dependencies [5eba770]
+- Updated dependencies [13b1e84]
+  - @module-federation/sdk@2.4.0
+  - @module-federation/dts-plugin@2.4.0
+
+## 2.3.3
+
+### Patch Changes
+
+- Updated dependencies [6d33275]
+  - @module-federation/dts-plugin@2.3.3
+  - @module-federation/sdk@2.3.3
+
 ## 2.3.2
 
 ### Patch Changes
