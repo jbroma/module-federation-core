@@ -1,5 +1,45 @@
 # @module-federation/enhanced
 
+## 2.4.0
+
+### Minor Changes
+
+- 13b1e84: chore: remove the legacy Data Prefetch package and its related configuration, manifest fields, and runtime hooks.
+
+### Patch Changes
+
+- Updated dependencies [5eba770]
+- Updated dependencies [13b1e84]
+  - @module-federation/sdk@2.4.0
+  - @module-federation/manifest@2.4.0
+  - @module-federation/webpack-bundler-runtime@2.4.0
+  - @module-federation/bridge-react-webpack-plugin@2.4.0
+  - @module-federation/cli@2.4.0
+  - @module-federation/dts-plugin@2.4.0
+  - @module-federation/managers@2.4.0
+  - @module-federation/rspack@2.4.0
+  - @module-federation/runtime-tools@2.4.0
+  - @module-federation/inject-external-runtime-core-plugin@2.4.0
+  - @module-federation/error-codes@2.4.0
+
+## 2.3.3
+
+### Patch Changes
+
+- Updated dependencies [6d33275]
+  - @module-federation/dts-plugin@2.3.3
+  - @module-federation/cli@2.3.3
+  - @module-federation/manifest@2.3.3
+  - @module-federation/rspack@2.3.3
+  - @module-federation/webpack-bundler-runtime@2.3.3
+  - @module-federation/sdk@2.3.3
+  - @module-federation/runtime-tools@2.3.3
+  - @module-federation/managers@2.3.3
+  - @module-federation/bridge-react-webpack-plugin@2.3.3
+  - @module-federation/data-prefetch@2.3.3
+  - @module-federation/error-codes@2.3.3
+  - @module-federation/inject-external-runtime-core-plugin@2.3.3
+
 ## 2.3.2
 
 ### Patch Changes
