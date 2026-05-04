@@ -23,6 +23,7 @@ import {
   stubRemoteEntry,
 } from './helpers';
 import { createManifest } from './manifest';
+import { createManifestMiddleware } from './manifest-middleware';
 import { normalizeExtraOptions } from './normalize-extra-options';
 import { normalizeOptions } from './normalize-options';
 import { createResolveRequest } from './resolver';
@@ -124,7 +125,12 @@ function augmentConfig(
     enableRuntimeRequirePatching: flags.unstable_patchRuntimeRequire,
   });
 
-  const manifestPath = createManifest(options, tmpDirPath);
+  const manifestOptions = {
+    projectRoot: config.projectRoot,
+    target: isUsingMFBundleCommand() ? 'build' : 'development',
+    tmpDirPath,
+  } as const;
+  const manifestPath = createManifest(options, tmpDirPath, manifestOptions);
 
   // host and remote entries are entry points, so they need to be present in the filesystem
   // we create stubs on the filesystem and then redirect corresponding virtual modules
@@ -154,6 +160,7 @@ function augmentConfig(
         options,
         isUsingMFBundleCommand(),
         manifestPath,
+        manifestOptions,
       ),
       getModulesRunBeforeMainModule: (entryFilePath) => {
         // skip altering the list of modules when unstable_patchInitializeCore is enabled
@@ -209,7 +216,16 @@ function augmentConfig(
     },
     server: {
       ...config.server,
-      enhanceMiddleware: vmManager.getMiddleware(),
+      enhanceMiddleware: (middleware, metroServer) => {
+        const manifestMiddleware = createManifestMiddleware({
+          federationConfig: options,
+          projectRoot: config.projectRoot,
+          remoteEntryPath,
+          tmpDirPath,
+          vmManager,
+        })(middleware, metroServer);
+        return vmManager.getMiddleware()(manifestMiddleware, metroServer);
+      },
       rewriteRequestUrl: createRewriteRequest({
         config,
         originalEntryFilename,

@@ -43,8 +43,38 @@ const buildUrlForEntryBundle = (entry: string) => {
   return entry;
 };
 
+const getDevManifestUrl = (url: string) => {
+  if (!__DEV__) {
+    return url;
+  }
+
+  try {
+    const parsedUrl = new URL(url);
+    if (!parsedUrl.pathname.endsWith('/mf-manifest.json')) {
+      return url;
+    }
+
+    const queryParams = getQueryParams();
+    for (const [key, value] of queryParams) {
+      if (!parsedUrl.searchParams.has(key)) {
+        parsedUrl.searchParams.set(key, value);
+      }
+    }
+    return parsedUrl.toString();
+  } catch {
+    return url;
+  }
+};
+
 const MetroCorePlugin: () => ModuleFederationRuntimePlugin = () => ({
   name: 'metro-core-plugin',
+  fetch: async (url, options) => {
+    const manifestUrl = getDevManifestUrl(url);
+    if (manifestUrl === url || typeof fetch !== 'function') {
+      return undefined;
+    }
+    return fetch(manifestUrl, options);
+  },
   loadEntry: async ({ remoteInfo }) => {
     const { entry, entryGlobalName } = remoteInfo;
 

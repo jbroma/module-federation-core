@@ -23,6 +23,7 @@ import {
   removeExtension,
   toPosixPath,
 } from './helpers';
+import { getSharedVirtualModulePath } from './manifest';
 
 interface CreateResolveRequestOptions {
   isRemote: boolean;
@@ -155,8 +156,8 @@ export function createResolveRequest({
       const importName = options.shared[sharedName].import || sharedName;
       // module import
       if (moduleName === importName) {
-        const sharedPath = getSharedPath(moduleName, paths.tmpDir);
-        const sharedGenerator = () => getRemoteModule(moduleName);
+        const sharedPath = getSharedPath(sharedName, paths.tmpDir);
+        const sharedGenerator = () => getRemoteModule(importName);
         vmManager.registerVirtualModule(sharedPath, sharedGenerator);
         return { type: 'sourceFile', filePath: sharedPath };
       }
@@ -205,9 +206,7 @@ export function createResolveRequest({
 }
 
 function getSharedPath(name: string, dir: string) {
-  const sharedModuleName = name.replaceAll('/', '_');
-  const sharedModuleDir = path.join(dir, 'shared');
-  return path.join(sharedModuleDir, `${sharedModuleName}.js`);
+  return getSharedVirtualModulePath(dir, name);
 }
 
 function getRemoteModulePath(name: string, dir: string) {

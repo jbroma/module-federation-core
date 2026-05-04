@@ -4,7 +4,11 @@ import type { SerializerConfigT } from 'metro-config';
 import type { ModuleFederationConfigNormalized, ShareObject } from '../types';
 import { ConfigError } from '../utils/errors';
 import { toPosixPath } from './helpers';
-import { recordBundleHash, updateManifest } from './manifest';
+import {
+  type ManifestGenerationOptions,
+  recordBundleHash,
+  updateManifest,
+} from './manifest';
 import {
   CountingSet,
   baseJSBundle,
@@ -17,6 +21,7 @@ export function getModuleFederationSerializer(
   mfConfig: ModuleFederationConfigNormalized,
   isUsingMFBundleCommand: boolean,
   manifestPath?: string,
+  manifestOptions?: ManifestGenerationOptions,
 ): CustomSerializer {
   const bundleHashes = new Map<string, string>();
 
@@ -69,7 +74,7 @@ export function getModuleFederationSerializer(
         options.projectRoot,
         mfConfig,
       );
-      updateManifest(manifestPath, mfConfig, bundleHashes);
+      updateManifest(manifestPath, mfConfig, bundleHashes, manifestOptions);
     }
 
     return code;

@@ -3,18 +3,29 @@ import fs from 'node:fs';
 import path from 'node:path';
 import type { Manifest, StatsAssets } from '@module-federation/sdk';
 import type { ModuleFederationConfigNormalized } from '../types';
-import { MANIFEST_FILENAME } from './constants';
+import { MANIFEST_FILENAME, TMP_DIR_NAME } from './constants';
 import { removeExtension, toPosixPath } from './helpers';
 
-type BundleHashMap = Map<string, string>;
+export type BundleHashMap = Map<string, string>;
+
+export type ManifestGenerationOptions = {
+  projectRoot?: string;
+  target?: 'development' | 'build';
+  tmpDirPath?: string;
+};
 
 export function createManifest(
   options: ModuleFederationConfigNormalized,
   mfMetroPath: string,
-  hashes?: BundleHashMap,
+  hashesOrOptions?: BundleHashMap | ManifestGenerationOptions,
+  manifestOptions?: ManifestGenerationOptions,
 ) {
+  const { hashes, options: generationOptions } = normalizeManifestArgs(
+    hashesOrOptions,
+    manifestOptions,
+  );
   const manifestPath = path.join(mfMetroPath, MANIFEST_FILENAME);
-  const manifest = generateManifest(options, hashes);
+  const manifest = generateManifest(options, hashes, generationOptions);
   fs.writeFileSync(manifestPath, JSON.stringify(manifest, undefined, 2));
   return manifestPath;
 }
@@ -22,9 +33,14 @@ export function createManifest(
 export function updateManifest(
   manifestPath: string,
   options: ModuleFederationConfigNormalized,
-  hashes?: BundleHashMap,
+  hashesOrOptions?: BundleHashMap | ManifestGenerationOptions,
+  manifestOptions?: ManifestGenerationOptions,
 ): string {
-  const manifest = generateManifest(options, hashes);
+  const { hashes, options: generationOptions } = normalizeManifestArgs(
+    hashesOrOptions,
+    manifestOptions,
+  );
+  const manifest = generateManifest(options, hashes, generationOptions);
   fs.writeFileSync(manifestPath, JSON.stringify(manifest, undefined, 2));
   return manifestPath;
 }
@@ -50,6 +66,7 @@ export function recordBundleHash(
 function generateManifest(
   config: ModuleFederationConfigNormalized,
   hashes?: BundleHashMap,
+  manifestOptions: ManifestGenerationOptions = {},
 ): Manifest {
   return {
     id: config.name,
@@ -57,7 +74,7 @@ function generateManifest(
     metaData: generateMetaData(config, hashes),
     exposes: generateExposes(config, hashes),
     remotes: generateRemotes(config),
-    shared: generateShared(config, hashes),
+    shared: generateShared(config, hashes, manifestOptions),
   };
 }
 
@@ -124,6 +141,7 @@ function generateRemotes(
 function generateShared(
   config: ModuleFederationConfigNormalized,
   hashes?: BundleHashMap,
+  manifestOptions: ManifestGenerationOptions = {},
 ): Manifest['shared'] {
   return Object.keys(config.shared).map((sharedName) => {
     const assets = getEmptyAssets();
@@ -131,7 +149,7 @@ function generateShared(
     if (config.shared[sharedName].eager) {
       assets.js.sync.push(config.filename);
     } else if (config.shared[sharedName].import !== false) {
-      assets.js.sync.push(`shared/${sharedName}.bundle`);
+      assets.js.sync.push(getSharedAssetPath(sharedName, manifestOptions));
     }
 
     return {
@@ -186,17 +204,24 @@ function resolveBundleKey(
     }
   }
 
+  const virtualSharedKey = resolveDevVirtualSharedKey(
+    entryPoint,
+    projectRoot,
+    config,
+  );
+  if (virtualSharedKey) {
+    return virtualSharedKey;
+  }
+
   // Shared module — extract package name from the last node_modules/ segment.
   // Works for both plain and pnpm virtual store layouts.
   const absPath = toPosixPath(path.resolve(entryPoint));
   const nmMatch = absPath.match(/.*node_modules\/(.+)/);
   if (nmMatch) {
-    const parts = nmMatch[1].split('/');
-    const pkgName = parts[0].startsWith('@')
-      ? `${parts[0]}/${parts[1]}`
-      : parts[0];
-    if (config.shared[pkgName]) {
-      return `shared:${pkgName}`;
+    const modulePath = removeExtension(nmMatch[1]);
+    const sharedKey = findSharedKeyForModulePath(modulePath, config);
+    if (sharedKey) {
+      return `shared:${sharedKey}`;
     }
   }
 
@@ -204,6 +229,101 @@ function resolveBundleKey(
 }
 
 // --- Helpers ---
+
+function normalizeManifestArgs(
+  hashesOrOptions?: BundleHashMap | ManifestGenerationOptions,
+  manifestOptions?: ManifestGenerationOptions,
+): {
+  hashes: BundleHashMap | undefined;
+  options: ManifestGenerationOptions;
+} {
+  if (hashesOrOptions instanceof Map) {
+    return { hashes: hashesOrOptions, options: manifestOptions ?? {} };
+  }
+  return { hashes: undefined, options: hashesOrOptions ?? {} };
+}
+
+export function getSharedVirtualModuleName(sharedName: string): string {
+  return sharedName.replaceAll('/', '_');
+}
+
+export function getSharedVirtualModulePath(
+  tmpDirPath: string,
+  sharedName: string,
+): string {
+  return path.join(
+    tmpDirPath,
+    'shared',
+    `${getSharedVirtualModuleName(sharedName)}.js`,
+  );
+}
+
+function getSharedAssetPath(
+  sharedName: string,
+  manifestOptions: ManifestGenerationOptions,
+): string {
+  if (
+    manifestOptions.target === 'development' &&
+    manifestOptions.projectRoot &&
+    manifestOptions.tmpDirPath
+  ) {
+    return toPosixPath(
+      path.relative(
+        manifestOptions.projectRoot,
+        getSharedVirtualModulePath(manifestOptions.tmpDirPath, sharedName),
+      ),
+    );
+  }
+  return `shared/${sharedName}.bundle`;
+}
+
+function resolveDevVirtualSharedKey(
+  entryPoint: string,
+  projectRoot: string,
+  config: ModuleFederationConfigNormalized,
+): string | null {
+  const relativePath = toPosixPath(path.relative(projectRoot, entryPoint));
+  const virtualSharedPrefix = `node_modules/${TMP_DIR_NAME}/shared/`;
+  if (!relativePath.startsWith(virtualSharedPrefix)) {
+    return null;
+  }
+
+  const virtualModuleName = removeExtension(
+    relativePath.slice(virtualSharedPrefix.length),
+  );
+  const sharedKey = Object.keys(config.shared).find(
+    (sharedName) =>
+      getSharedVirtualModuleName(sharedName) === virtualModuleName,
+  );
+  return sharedKey ? `shared:${sharedKey}` : null;
+}
+
+function findSharedKeyForModulePath(
+  modulePath: string,
+  config: ModuleFederationConfigNormalized,
+): string | null {
+  const sharedEntries = Object.entries(config.shared)
+    .map(([sharedName, sharedConfig]) => {
+      const importName =
+        typeof sharedConfig.import === 'string'
+          ? sharedConfig.import
+          : sharedName;
+      return { importName, sharedName };
+    })
+    .sort((a, b) => b.importName.length - a.importName.length);
+
+  const normalizedModulePath = toPosixPath(modulePath);
+  for (const { importName, sharedName } of sharedEntries) {
+    if (
+      normalizedModulePath === importName ||
+      normalizedModulePath.startsWith(`${importName}/`)
+    ) {
+      return sharedName;
+    }
+  }
+
+  return null;
+}
 
 function getManifestVersion(version: unknown): string {
   return typeof version === 'string' ? version : '';
