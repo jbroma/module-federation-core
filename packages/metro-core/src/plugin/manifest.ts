@@ -186,14 +186,6 @@ function resolveBundleKey(
   projectRoot: string,
   config: ModuleFederationConfigNormalized,
 ): string | null {
-  // Container entry — filename matches config.filename (ignoring extension)
-  if (
-    removeExtension(path.basename(entryPoint)) ===
-    removeExtension(path.basename(config.filename))
-  ) {
-    return `container:${config.name}`;
-  }
-
   // Exposed module — match entry point against expose config paths
   const relPath = toPosixPath(path.relative(projectRoot, entryPoint));
   const normalizedRel = relPath.startsWith('./') ? relPath.slice(2) : relPath;
@@ -211,6 +203,14 @@ function resolveBundleKey(
     ) {
       return `expose:${exposeKey.replace('./', '')}`;
     }
+  }
+
+  // Container entry — filename matches config.filename (ignoring extension)
+  if (
+    removeExtension(path.basename(entryPoint)) ===
+    removeExtension(path.basename(config.filename))
+  ) {
+    return `container:${config.name}`;
   }
 
   const virtualSharedKey = resolveDevVirtualSharedKey(

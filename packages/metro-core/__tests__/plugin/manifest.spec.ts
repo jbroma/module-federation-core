@@ -117,6 +117,30 @@ describe('manifest hash generation', () => {
     expect(hashes.get('shared:lodash')).toBe(sha256(code));
   });
 
+  it('matches exposed module hashes before container filename fallback', () => {
+    const projectRoot = createProjectRoot();
+    const hashes = new Map<string, string>();
+    const code = 'exposed remote module bundle';
+    const config = {
+      ...createConfig(),
+      filename: 'remote.bundle',
+      exposes: {
+        './remote': './src/remote.tsx',
+      },
+    };
+
+    recordBundleHash(
+      hashes,
+      code,
+      path.join(projectRoot, 'src', 'remote.tsx'),
+      projectRoot,
+      config,
+    );
+
+    expect(hashes.get('expose:remote')).toBe(sha256(code));
+    expect(hashes.has('container:mini')).toBe(false);
+  });
+
   it('preserves generated type metadata when updating manifest hashes', () => {
     const projectRoot = createProjectRoot();
     const tmpDirPath = path.join(projectRoot, 'node_modules', '.mf-metro');
