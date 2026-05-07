@@ -52,7 +52,6 @@ export function createManifestMiddleware({
   tmpDirPath,
   vmManager,
 }: ManifestMiddlewareOptions): NonNullable<ServerConfigT['enhanceMiddleware']> {
-  let lastWarmupOptions: ManifestWarmupOptions | null = null;
   const warmups = new Map<string, Promise<void>>();
 
   return (middleware, metroServer) => {
@@ -60,13 +59,9 @@ export function createManifestMiddleware({
 
     return async (req, res, next) => {
       try {
-        const warmupOptions = getManifestWarmupOptions(
-          req.url,
-          lastWarmupOptions,
-        );
+        const warmupOptions = getManifestWarmupOptions(req.url);
 
         if (warmupOptions) {
-          lastWarmupOptions = warmupOptions;
           const warmupKey = JSON.stringify(warmupOptions);
           let warmup = warmups.get(warmupKey);
 
@@ -101,7 +96,6 @@ export function createManifestMiddleware({
 
 function getManifestWarmupOptions(
   rawUrl: string | undefined,
-  fallbackOptions: ManifestWarmupOptions | null,
 ): ManifestWarmupOptions | null {
   const parsedUrl = new URL(rawUrl ?? '/', 'http://localhost');
   if (parsedUrl.pathname !== `/${MANIFEST_FILENAME}`) {
@@ -109,29 +103,16 @@ function getManifestWarmupOptions(
   }
 
   const platform = parsedUrl.searchParams.get('platform');
-  if (!platform && !fallbackOptions) {
+  if (!platform) {
     return null;
   }
 
   return {
-    dev: getBoolean(
-      parsedUrl.searchParams,
-      'dev',
-      fallbackOptions?.dev ?? true,
-    ),
-    excludeSource: getBoolean(
-      parsedUrl.searchParams,
-      'excludeSource',
-      fallbackOptions?.excludeSource ?? false,
-    ),
-    minify: getBoolean(
-      parsedUrl.searchParams,
-      'minify',
-      fallbackOptions?.minify ?? false,
-    ),
-    platform: platform ?? fallbackOptions!.platform,
-    sourcePaths:
-      parsedUrl.searchParams.get('sourcePaths') ?? fallbackOptions?.sourcePaths,
+    dev: getBoolean(parsedUrl.searchParams, 'dev', true),
+    excludeSource: getBoolean(parsedUrl.searchParams, 'excludeSource', false),
+    minify: getBoolean(parsedUrl.searchParams, 'minify', false),
+    platform,
+    sourcePaths: parsedUrl.searchParams.get('sourcePaths') ?? undefined,
   };
 }
 

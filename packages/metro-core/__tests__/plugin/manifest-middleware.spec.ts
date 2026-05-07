@@ -86,5 +86,20 @@ describe('createManifestMiddleware', () => {
       'http://localhost:8082/src/info.bundle?platform=ios&dev=true&lazy=true&minify=false&runModule=false&modulesOnly=true',
       'http://localhost:8082/node_modules/.mf-metro/shared/lodash.bundle?platform=ios&dev=true&lazy=true&minify=false&runModule=false&modulesOnly=true',
     ]);
+
+    build.mockClear();
+    middleware.mockClear();
+
+    await enhanced(
+      {
+        url: '/mf-manifest.json',
+        headers: { host: 'localhost:8082' },
+      } as any,
+      {} as any,
+      next,
+    );
+
+    expect(build).not.toHaveBeenCalled();
+    expect(middleware).toHaveBeenCalledTimes(1);
   });
 });
