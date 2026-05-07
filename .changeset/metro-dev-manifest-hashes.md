@@ -2,4 +2,4 @@
 '@module-federation/metro': patch
 ---
 
-fix(metro): move manifest hashing to serialization and support dev builds
+feat(metro): support manifest hashes in dev builds
