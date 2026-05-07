@@ -3,7 +3,11 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
-import { createManifest, recordBundleHash } from '../../src/plugin/manifest';
+import {
+  createManifest,
+  recordBundleHash,
+  updateManifest,
+} from '../../src/plugin/manifest';
 import type { ModuleFederationConfigNormalized } from '../../src/types';
 
 const tmpDirs: string[] = [];
@@ -111,6 +115,43 @@ describe('manifest hash generation', () => {
     );
 
     expect(hashes.get('shared:lodash')).toBe(sha256(code));
+  });
+
+  it('preserves generated type metadata when updating manifest hashes', () => {
+    const projectRoot = createProjectRoot();
+    const tmpDirPath = path.join(projectRoot, 'node_modules', '.mf-metro');
+    fs.mkdirSync(tmpDirPath, { recursive: true });
+
+    const config = createConfig();
+    const manifestPath = createManifest(config, tmpDirPath, {
+      projectRoot,
+      tmpDirPath,
+      target: 'development',
+    });
+
+    const manifest = JSON.parse(fs.readFileSync(manifestPath, 'utf-8'));
+    manifest.metaData.types.api = '@mf-types.d.ts';
+    manifest.metaData.types.zip = '@mf-types.zip';
+    fs.writeFileSync(manifestPath, JSON.stringify(manifest, undefined, 2));
+
+    const hashes = new Map<string, string>([
+      ['container:mini', sha256('container bundle')],
+    ]);
+    updateManifest(manifestPath, config, hashes, {
+      projectRoot,
+      tmpDirPath,
+      target: 'development',
+    });
+
+    const updatedManifest = JSON.parse(fs.readFileSync(manifestPath, 'utf-8'));
+
+    expect(updatedManifest.metaData.types).toMatchObject({
+      api: '@mf-types.d.ts',
+      zip: '@mf-types.zip',
+    });
+    expect(updatedManifest.metaData.buildInfo.hash).toBe(
+      sha256('container bundle'),
+    );
   });
 
   it('prefers the longest shared key when hashing deep node_modules imports', () => {

@@ -41,6 +41,15 @@ export function updateManifest(
     manifestOptions,
   );
   const manifest = generateManifest(options, hashes, generationOptions);
+  const existingManifest = readManifest(manifestPath);
+
+  if (existingManifest?.metaData?.types) {
+    manifest.metaData.types = {
+      ...manifest.metaData.types,
+      ...existingManifest.metaData.types,
+    };
+  }
+
   fs.writeFileSync(manifestPath, JSON.stringify(manifest, undefined, 2));
   return manifestPath;
 }
@@ -241,6 +250,13 @@ function normalizeManifestArgs(
     return { hashes: hashesOrOptions, options: manifestOptions ?? {} };
   }
   return { hashes: undefined, options: hashesOrOptions ?? {} };
+}
+
+function readManifest(manifestPath: string): Manifest | undefined {
+  if (!fs.existsSync(manifestPath)) {
+    return;
+  }
+  return JSON.parse(fs.readFileSync(manifestPath, 'utf-8')) as Manifest;
 }
 
 export function getSharedVirtualModuleName(sharedName: string): string {
