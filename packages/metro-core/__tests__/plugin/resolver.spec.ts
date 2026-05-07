@@ -79,7 +79,7 @@ function createResolverContext(
   };
 }
 
-function resolveSharedModule({
+function createSharedResolverFixture({
   sharedName,
   importName,
 }: Omit<SharedResolutionCase, 'expectedFileName'>) {
@@ -108,21 +108,12 @@ function resolveSharedModule({
     paths: createPaths(projectDir, tmpDir),
     vmManager,
   });
-  const resolved = resolveRequest(context, importName, 'ios');
-  if (resolved.type !== 'sourceFile') {
-    throw new Error('Expected shared import to resolve to a source file');
-  }
-
-  const registeredModule = vi
-    .mocked(vmManager.registerVirtualModule)
-    .mock.calls[0]?.[1]?.();
 
   return {
+    context,
     fallbackResolver,
-    registeredModuleCode: registeredModule,
-    registeredPath: vi.mocked(vmManager.registerVirtualModule).mock
-      .calls[0]?.[0],
-    resolved,
+    resolveRequest,
+    vmManager,
   };
 }
 
@@ -154,19 +145,24 @@ describe('createResolveRequest', () => {
         expectedFileName,
       );
 
-      const {
-        fallbackResolver,
-        registeredModuleCode,
-        registeredPath,
-        resolved,
-      } = resolveSharedModule({ sharedName, importName });
+      const { context, fallbackResolver, resolveRequest, vmManager } =
+        createSharedResolverFixture({ sharedName, importName });
+
+      const resolved = resolveRequest(context, importName, 'ios');
 
       expect(resolved).toEqual({
         type: 'sourceFile',
         filePath: expectedPath,
       });
+
+      // The resolver also registers the virtual module it returns. The path
+      // must stay keyed by sharedName, while the generated code loads the
+      // actual package import that Metro resolved.
+      const [[registeredPath, registeredModule]] = vi.mocked(
+        vmManager.registerVirtualModule,
+      ).mock.calls;
       expect(registeredPath).toBe(expectedPath);
-      expect(registeredModuleCode).toContain(
+      expect(registeredModule()).toContain(
         `getModuleFromRegistry("${importName}")`,
       );
       expect(fallbackResolver).not.toHaveBeenCalled();
